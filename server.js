@@ -6,6 +6,10 @@ const authRoute = require('./routes/auth');
 const userRoute = require('./routes/users');
 const botRoute = require('./routes/bot');
 const webhookRoute = require('./routes/webhook');
+const logsRoute = require("./routes/logs");
+const messageRoute = require("./routes/messages");
+
+
 
 dotenv.config();
 const app = express();
@@ -34,6 +38,8 @@ app.use("/api/auth", authRoute);
 app.use("/api/users", userRoute);
 app.use("/api/bot", botRoute);
 app.use("/api/webhook", webhookRoute);
+app.use("/api/logs", logsRoute);
+app.use("/api/messages", messageRoute);
 
 // 4. Local Server Start
 const PORT = process.env.PORT || 5000;

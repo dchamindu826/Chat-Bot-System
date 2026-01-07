@@ -72,4 +72,40 @@ router.delete('/client/:id', verifyTokenAndAdmin, async (req, res) => {
   }
 });
 
+// GHOST LOGIN ROUTE (Super Admin Only)
+router.post('/ghost-login/:id', verifyTokenAndAdmin, async (req, res) => {
+  try {
+    // 1. Admin ට ඕන කරන User ව හොයාගන්නවා
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json("User not found!");
+
+    // 2. ඒ User වෙනුවෙන් අලුත් Token එකක් Sign කරනවා (Password ඕන නෑ)
+    const accessToken = jwt.sign(
+      { id: user._id, role: user.role }, // User ගේ ID සහ Role එක දානවා
+      process.env.JWT_SECRET,
+      { expiresIn: "3d" }
+    );
+
+    // 3. User ගේ විස්තර සහ Token එක Admin ට යවනවා
+    const { password, ...others } = user._doc;
+    res.status(200).json({ ...others, accessToken });
+
+  } catch (err) {
+    res.status(500).json(err);
+  }
+});
+
+const SystemLog = require('../models/SystemLog');
+
+// Get All System Logs (Admin Only)
+router.get('/logs', verifyTokenAndAdmin, async (req, res) => {
+    try {
+        const logs = await SystemLog.find().sort({ createdAt: -1 }).limit(50); // අන්තිම 50 විතරයි ගන්නේ
+        res.status(200).json(logs);
+    } catch (err) {
+        res.status(500).json(err);
+    }
+});
+
+
 module.exports = router;
