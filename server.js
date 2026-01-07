@@ -18,7 +18,7 @@ const app = express();
 // --- CORS FIX ---
 // origin: true දැම්මම ඕනෑම origin එකකින් එන request එකක් allow කරනවා
 app.use(cors({
-    origin: true, 
+    origin: ["http://localhost:5173", "https://chat-bot-system-frontend.vercel.app"],
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     credentials: true,
     allowedHeaders: ["Content-Type", "token", "Authorization"]
