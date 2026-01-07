@@ -5,7 +5,7 @@ const dotenv = require('dotenv');
 
 // Routes Import
 const authRoute = require('./routes/auth');
-const userRoute = require('./routes/users'); // <--- මේක අනිවාර්යයි
+const userRoute = require('./routes/users');
 const botRoute = require('./routes/bot');
 const webhookRoute = require('./routes/webhook');
 const logsRoute = require("./routes/logs");
@@ -15,30 +15,42 @@ const analyticsRoute = require("./routes/analytics");
 dotenv.config();
 const app = express();
 
+// --- CORS FIX ---
+// origin: true දැම්මම ඕනෑම origin එකකින් එන request එකක් allow කරනවා
 app.use(cors({
-    origin: ["http://localhost:5173", "https://chat-bot-system-two.vercel.app"],
-    methods: ["GET", "POST", "PUT", "DELETE"],
-    credentials: true
+    origin: true, 
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    credentials: true,
+    allowedHeaders: ["Content-Type", "token", "Authorization"]
 }));
+
+// Pre-flight requests වලට අවසර දීම
+app.options('*', cors());
 
 app.use(express.json());
 
+// Database Connection
 mongoose.connect(process.env.MONGO_URL)
-  .then(() => console.log("DB Connection Successful!"))
-  .catch((err) => console.log(err));
+  .then(() => console.log("DB Connection Successful! ✅"))
+  .catch((err) => console.log("DB Connection Error: ❌", err));
 
 app.get("/", (req, res) => {
-  res.send("CRM Backend is Running on Vercel! 🚀");
+  res.send("SmartReply CRM Backend is Running! 🚀");
 });
 
 // Routes Definitions
 app.use("/api/auth", authRoute);
-app.use("/api/users", userRoute); // <--- Settings Page එකට මේක ඕන
+app.use("/api/users", userRoute);
 app.use("/api/bot", botRoute);
 app.use("/api/webhook", webhookRoute);
 app.use("/api/logs", logsRoute);
 app.use("/api/messages", messageRoute);
 app.use("/api/analytics", analyticsRoute);
+
+// Vercel වලට අත්‍යවශ්‍යයි: 404 handler
+app.use((req, res) => {
+    res.status(404).json({ message: "Route not found" });
+});
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
