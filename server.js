@@ -24,8 +24,8 @@ app.use(cors({
     allowedHeaders: ["Content-Type", "token", "Authorization"]
 }));
 
-// Pre-flight requests වලට අවසර දීම
-app.options('*', cors());
+// REMOVED: app.options('*', cors()); caused the PathError crash.
+// The app.use(cors(...)) above handles pre-flight requests automatically.
 
 app.use(express.json());
 
