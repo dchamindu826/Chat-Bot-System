@@ -48,8 +48,9 @@ const sendWhatsAppMessage = async (token, phoneId, to, reply) => {
       }
 
       // Filename for documents
-      if(type === 'document' && reply.fileName) {
-          data[type].filename = reply.fileName;
+      if(type === 'document') {
+          // නමක් තිබ්බොත් ඒක දානවා, නැත්නම් 'File.pdf' කියලා බොරු නමක් හරි දානවා
+          data[type].filename = reply.fileName || "Document.pdf";
       }
 
     } else if (reply.content) {
