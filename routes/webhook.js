@@ -3,7 +3,7 @@ const User = require('../models/User');
 const BotConfig = require('../models/BotConfig');
 const ChatSession = require('../models/ChatSession');
 const SystemLog = require('../models/SystemLog');
-const Message = require('../models/Message'); // <--- New Import
+const Message = require('../models/Message');
 const axios = require('axios');
 
 const VERIFY_TOKEN = process.env.META_VERIFY_TOKEN || "my_secure_verify_token";
@@ -23,55 +23,46 @@ router.get('/', (req, res) => {
   }
 });
 
-// Helper: Error Logger
-const logError = async (message, details = {}) => {
+// Helper: Error Logger (Updated to accept Client Name)
+const logError = async (message, details = {}, clientName = "Unknown") => {
   try {
-    await SystemLog.create({ type: 'ERROR', source: 'Webhook', message, metaData: details });
+    await SystemLog.create({
+      type: 'ERROR',
+      source: 'Webhook',
+      message: message,
+      metaData: { ...details, client: clientName } // Client Name එක Database එකට යනවා
+    });
   } catch (e) { console.error("Logging Failed:", e); }
 };
 
 // Helper: Save Message to DB
 const saveMessage = async (userId, phone, direction, type, content) => {
   try {
-    await Message.create({
-      userId,
-      customerPhone: phone,
-      direction,
-      type,
-      content
-    });
+    await Message.create({ userId, customerPhone: phone, direction, type, content });
   } catch (e) { console.error("Message Save Failed:", e); }
 };
 
 // Helper: Send WhatsApp Message
 const sendWhatsAppMessage = async (client, to, reply) => {
+  const clientName = client.businessName || client.name;
   try {
     const { phoneNumberId, accessToken } = client.whatsappConfig;
     
-    let data = {
-      messaging_product: "whatsapp",
-      recipient_type: "individual",
-      to: to,
-    };
-
-    let msgContent = ""; // To save in DB
+    let data = { messaging_product: "whatsapp", recipient_type: "individual", to: to };
+    let msgContent = "";
 
     if (reply.media) {
-      const type = reply.mediaType === 'image' ? 'image' :
-                   reply.mediaType === 'video' ? 'video' : 'document';
+      const type = reply.mediaType === 'image' ? 'image' : reply.mediaType === 'video' ? 'video' : 'document';
       data.type = type;
       data[type] = { link: reply.media };
       if (reply.content) data[type].caption = reply.content;
       if(type === 'document') data[type].filename = reply.fileName || "Document.pdf";
-      
-      msgContent = reply.media; // Save URL as content
+      msgContent = reply.media;
     } else if (reply.content) {
       data.type = "text";
       data.text = { body: reply.content };
       msgContent = reply.content;
-    } else {
-      return;
-    }
+    } else { return; }
 
     await axios.post(
       `https://graph.facebook.com/v17.0/${phoneNumberId}/messages`,
@@ -79,12 +70,11 @@ const sendWhatsAppMessage = async (client, to, reply) => {
       { headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' } }
     );
 
-    // Save Outbound Message
     await saveMessage(client._id, to, 'outbound', reply.media ? reply.mediaType : 'text', msgContent);
 
   } catch (error) {
     const errMsg = error.response ? JSON.stringify(error.response.data) : error.message;
-    await logError("Failed to send WhatsApp message", { to, error: errMsg });
+    await logError("Failed to send WhatsApp message", { to, error: errMsg }, clientName);
     throw error;
   }
 };
@@ -92,15 +82,9 @@ const sendWhatsAppMessage = async (client, to, reply) => {
 // 2. POST Route
 router.post('/', async (req, res) => {
   const body = req.body;
-
   if (body.object) {
     try {
-      if (
-        body.entry &&
-        body.entry[0].changes &&
-        body.entry[0].changes[0].value.messages &&
-        body.entry[0].changes[0].value.messages[0]
-      ) {
+      if (body.entry && body.entry[0].changes && body.entry[0].changes[0].value.messages && body.entry[0].changes[0].value.messages[0]) {
         const change = body.entry[0].changes[0].value;
         const phoneNumberId = change.metadata.phone_number_id;
         const from = change.messages[0].from;
@@ -109,12 +93,16 @@ router.post('/', async (req, res) => {
 
         // Find Client
         const client = await User.findOne({ 'whatsappConfig.phoneNumberId': phoneNumberId });
+        
+        // Client not found logic
         if (!client) {
-          await logError("Client not found for Phone ID", { phoneNumberId });
+          await logError("Client not found for Phone ID", { phoneNumberId }, "Unknown ID");
           return res.sendStatus(200);
         }
 
-        // Save Inbound Message (Customer's Message)
+        const clientName = client.businessName || client.name; // Client Name එක ගන්නවා
+
+        // Save Inbound Message
         if (msgType === 'text') {
            await saveMessage(client._id, from, 'inbound', 'text', msgBody);
         }
@@ -132,8 +120,6 @@ router.post('/', async (req, res) => {
 
         if (currentStep < botConfig.replies.length) {
           const replyToSend = botConfig.replies[currentStep];
-          
-          // Updated Send Function (Passes whole client object)
           await sendWhatsAppMessage(client, from, replyToSend);
 
           session.currentStep += 1;
@@ -143,7 +129,7 @@ router.post('/', async (req, res) => {
       }
     } catch (err) {
       console.error("Webhook Error:", err.message);
-      await logError("Critical Webhook Error", { error: err.message });
+      await logError("Critical Webhook Error", { error: err.message }, "System");
     }
     res.sendStatus(200);
   } else {

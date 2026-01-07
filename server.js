@@ -8,7 +8,7 @@ const botRoute = require('./routes/bot');
 const webhookRoute = require('./routes/webhook');
 const logsRoute = require("./routes/logs");
 const messageRoute = require("./routes/messages");
-
+const analyticsRoute = require("./routes/analytics");
 
 
 dotenv.config();
@@ -40,6 +40,7 @@ app.use("/api/bot", botRoute);
 app.use("/api/webhook", webhookRoute);
 app.use("/api/logs", logsRoute);
 app.use("/api/messages", messageRoute);
+app.use("/api/analytics", analyticsRoute);
 
 // 4. Local Server Start
 const PORT = process.env.PORT || 5000;
