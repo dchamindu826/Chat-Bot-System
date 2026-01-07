@@ -7,8 +7,9 @@ const { verifyTokenAndAdmin } = require('../verifyToken');
 router.get('/overview', verifyTokenAndAdmin, async (req, res) => {
   try {
     // 1. Total Stats
-    // Active Clients: role='user' හෝ 'admin' ඕනම කෙනෙක් ගමු දැනට Test කරන්න
-    const activeClients = await User.countDocuments({ }); 
+    // FIX: Admin ව ගණන් නොගෙන, User role එක තියෙන අය විතරක් ගන්නවා
+    const activeClients = await User.countDocuments({ role: 'user' }); 
+    
     const totalMessages = await Message.countDocuments();
     const totalErrors = await SystemLog.countDocuments({ type: 'ERROR' });
 
@@ -27,7 +28,7 @@ router.get('/overview', verifyTokenAndAdmin, async (req, res) => {
       { $sort: { _id: 1 } }
     ]);
 
-    // Fill missing dates with 0 (Chart එක ලස්සනට පේන්න)
+    // Fill missing dates with 0
     const chartData = [];
     for (let i = 0; i < 7; i++) {
         const d = new Date();
@@ -41,7 +42,6 @@ router.get('/overview', verifyTokenAndAdmin, async (req, res) => {
         });
     }
     
-    // Sort by date ascending
     chartData.sort((a, b) => new Date(a.name) - new Date(b.name));
 
     res.status(200).json({
