@@ -16,7 +16,7 @@ const app = express();
 
 // 1. CORS Configuration (Frontend එකට Access දෙනවා)
 app.use(cors({
-    origin: "*", // ඕනම තැනකින් එන request එකක් ගන්නවා (Production වලදී Frontend URL එක දාන එක ආරක්ෂිතයි)
+    origin: ["http://localhost:5173", "https://chat-bot-system-two.vercel.app"], // Localhost සහ Live Site වලට අවසර දෙනවා
     methods: ["GET", "POST", "PUT", "DELETE"],
     credentials: true
 }));
