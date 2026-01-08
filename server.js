@@ -30,7 +30,12 @@ app.use(cors({
 app.use(express.json());
 
 // Database Connection
-mongoose.connect(process.env.MONGO_URL)
+mongoose.connect(process.env.MONGO_URL, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+    serverSelectionTimeoutMS: 5000, // Timeout after 5s instead of 30s
+    socketTimeoutMS: 45000, // Close sockets after 45s of inactivity
+})
   .then(() => console.log("DB Connection Successful! ✅"))
   .catch((err) => console.log("DB Connection Error: ❌", err));
 
