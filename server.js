@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
 
+
 // Routes Import
 const authRoute = require('./routes/auth');
 const userRoute = require('./routes/users');
@@ -11,6 +12,8 @@ const webhookRoute = require('./routes/webhook');
 const logsRoute = require("./routes/logs");
 const messageRoute = require("./routes/messages");
 const analyticsRoute = require("./routes/analytics");
+const teamRoute = require('./routes/team');
+const crmRoute = require("./routes/crm");
 
 dotenv.config();
 const app = express();
@@ -46,6 +49,8 @@ app.use("/api/webhook", webhookRoute);
 app.use("/api/logs", logsRoute);
 app.use("/api/messages", messageRoute);
 app.use("/api/analytics", analyticsRoute);
+app.use("/api/team", teamRoute);
+app.use("/api/team", teamRoute);
 
 // Vercel වලට අත්‍යවශ්‍යයි: 404 handler
 app.use((req, res) => {

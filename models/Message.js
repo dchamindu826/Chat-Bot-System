@@ -1,20 +1,19 @@
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
 
 const MessageSchema = new mongoose.Schema({
-  userId: { 
-    type: mongoose.Schema.Types.ObjectId, 
-    ref: 'User', 
-    required: true 
-  }, // මේ මැසේජ් එක අදාල Business Owner (Client)
-  customerPhone: { type: String, required: true }, // Customer ගේ නම්බර් එක
-  direction: { 
-    type: String, 
-    enum: ['inbound', 'outbound'], 
-    required: true 
-  }, // inbound = Customer එව්වා, outbound = Bot යැව්වා
-  type: { type: String, default: 'text' }, // text, image, video...
-  content: { type: String }, // මැසේජ් එක
-  status: { type: String, default: 'sent' } // sent, delivered, read
+  conversationId: { type: String }, // WhatsApp Conversation ID
+  sender: { type: String }, // Phone Number
+  recipient: { type: String }, // Our Number
+  text: { type: String },
+  type: { type: String, default: "text" },
+  
+  // ✅ Link to Contact Model
+  contactId: { type: mongoose.Schema.Types.ObjectId, ref: 'Contact' },
+  
+  // ✅ Link to Business Owner (Client)
+  ownerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+
+  isBotReply: { type: Boolean, default: false }
 }, { timestamps: true });
 
-module.exports = mongoose.model('Message', MessageSchema);
+module.exports = mongoose.model("Message", MessageSchema);

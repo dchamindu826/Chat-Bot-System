@@ -3,19 +3,18 @@ const User = require("../models/User");
 const CryptoJS = require("crypto-js");
 const jwt = require("jsonwebtoken");
 
-// REGISTER
+// 1. REGISTER (Admin හදන්න මේක ඕන)
 router.post("/register", async (req, res) => {
   try {
     const role = req.body.role || 'user';
     
-    // Encrypt Password
     const encryptedPassword = CryptoJS.AES.encrypt(
       req.body.password,
       process.env.PASS_SEC
     ).toString();
 
     const newUser = new User({
-      username: req.body.username,
+      name: req.body.name, // "username" වෙනුවට "name"
       email: req.body.email,
       password: encryptedPassword,
       role: role
@@ -29,7 +28,7 @@ router.post("/register", async (req, res) => {
   }
 });
 
-// LOGIN
+// 2. LOGIN (ලොග් වෙන්න මේක ඕන - ඔයාගේ ෆයිල් එකේ මේක අඩුවෙලා තිබුණා)
 router.post("/login", async (req, res) => {
   try {
     const user = await User.findOne({ email: req.body.email });
@@ -38,7 +37,6 @@ router.post("/login", async (req, res) => {
       return res.status(401).json({ message: "User not found!" });
     }
 
-    // Decrypt Password
     const hashedPassword = CryptoJS.AES.decrypt(user.password, process.env.PASS_SEC);
     const originalPassword = hashedPassword.toString(CryptoJS.enc.Utf8);
 
@@ -56,8 +54,8 @@ router.post("/login", async (req, res) => {
     res.status(200).json({ ...others, accessToken });
 
   } catch (err) {
-    console.error("Login Error:", err); // Vercel Logs වල බලාගන්න පුළුවන්
-    res.status(500).json({ message: "Internal Server Error", error: err.message });
+    console.error("Login Error:", err);
+    res.status(500).json(err);
   }
 });
 

@@ -1,33 +1,42 @@
 const jwt = require('jsonwebtoken');
 
+// 1. Token එක හරිද බලන Function එක
 const verifyToken = (req, res, next) => {
   const authHeader = req.headers.token;
   
   if (authHeader) {
-    // "Bearer <token>" format එකෙන් token එක ගන්නවා
     const token = authHeader.split(" ")[1]; 
 
-    jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
-      // 🛑 වැදගත්ම තැන: Error එකක් ආවොත් මෙතනින් නවත්වන්න (return දාන්න)
+    jwt.verify(token, process.env.JWT_SEC, (err, user) => { // JWT_SEC දැම්මා
       if (err) return res.status(403).json("Token is not valid!");
-      
       req.user = user;
-      next(); // ඔක්කොම හරි නම් විතරක් ඉස්සරහට යන්න
+      next(); 
     });
   } else {
     return res.status(401).json("You are not authenticated!");
   }
 };
 
-const verifyTokenAndAdmin = (req, res, next) => {
+// 2. Token එක සහ Authorization බලන Function එක (Update/Delete වලට)
+const verifyTokenAndAuthorization = (req, res, next) => {
   verifyToken(req, res, () => {
-    // req.user තියෙනවද කියලා check කරලා ඉන්න (Safety Check)
-    if (req.user && req.user.role === 'admin') {
+    if (req.user.id === req.params.id || req.user.role === 'admin') {
       next();
     } else {
-      return res.status(403).json("You are not allowed to do that!");
+      res.status(403).json("You are not allowed to do that!");
     }
   });
 };
 
-module.exports = { verifyToken, verifyTokenAndAdmin };
+// 3. Admin ද කියලා බලන Function එක (Clients Page එකට)
+const verifyTokenAndAdmin = (req, res, next) => {
+  verifyToken(req, res, () => {
+    if (req.user && req.user.role === 'admin') {
+      next();
+    } else {
+      return res.status(403).json("You are not allowed to do that! Admin access required.");
+    }
+  });
+};
+
+module.exports = { verifyToken, verifyTokenAndAuthorization, verifyTokenAndAdmin };

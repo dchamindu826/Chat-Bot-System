@@ -1,9 +1,10 @@
-// crm-backend/routes/users.js
 const router = require('express').Router();
 const User = require('../models/User');
-const BotConfig = require('../models/BotConfig'); // Delete කරනකොට Bot Data ත් මකන්න ඕන
+const BotConfig = require('../models/BotConfig');
+const SystemLog = require('../models/SystemLog');
 const { verifyTokenAndAdmin } = require('../verifyToken');
-const bcrypt = require('bcryptjs');
+const CryptoJS = require("crypto-js"); // bcrypt වෙනුවට crypto-js දැම්මා
+const jwt = require("jsonwebtoken");
 
 // 1. GET ALL CLIENTS
 router.get('/clients', verifyTokenAndAdmin, async (req, res) => {
@@ -22,12 +23,16 @@ router.get('/clients', verifyTokenAndAdmin, async (req, res) => {
 // 2. CREATE CLIENT
 router.post('/client', verifyTokenAndAdmin, async (req, res) => {
     try {
-        const salt = await bcrypt.genSalt(10);
-        const hashedPassword = await bcrypt.hash(req.body.password, salt);
+        // Password Encrypt using CryptoJS (To match auth.js login)
+        const encryptedPassword = CryptoJS.AES.encrypt(
+          req.body.password,
+          process.env.PASS_SEC
+        ).toString();
+
         const newUser = new User({
             name: req.body.name,
             email: req.body.email,
-            password: hashedPassword,
+            password: encryptedPassword,
             role: 'user',
             businessName: req.body.businessName,
             phone: req.body.phone,
@@ -40,13 +45,14 @@ router.post('/client', verifyTokenAndAdmin, async (req, res) => {
     }
 });
 
-// 3. UPDATE CLIENT (Edit Details & Active/Inactive)
+// 3. UPDATE CLIENT
 router.put('/client/:id', verifyTokenAndAdmin, async (req, res) => {
   try {
-    // Password එක වෙනස් කරනවා නම් විතරක් Hash කරන්න
     if (req.body.password) {
-      const salt = await bcrypt.genSalt(10);
-      req.body.password = await bcrypt.hash(req.body.password, salt);
+      req.body.password = CryptoJS.AES.encrypt(
+        req.body.password,
+        process.env.PASS_SEC
+      ).toString();
     }
 
     const updatedUser = await User.findByIdAndUpdate(
@@ -64,7 +70,6 @@ router.put('/client/:id', verifyTokenAndAdmin, async (req, res) => {
 router.delete('/client/:id', verifyTokenAndAdmin, async (req, res) => {
   try {
     await User.findByIdAndDelete(req.params.id);
-    // User ව මැකුවම එයාගේ Bot Settings ටිකත් මකන්න ඕන
     await BotConfig.findOneAndDelete({ userId: req.params.id });
     res.status(200).json("Client has been deleted...");
   } catch (err) {
@@ -72,21 +77,18 @@ router.delete('/client/:id', verifyTokenAndAdmin, async (req, res) => {
   }
 });
 
-// GHOST LOGIN ROUTE (Super Admin Only)
+// 5. GHOST LOGIN ROUTE (Super Admin Only)
 router.post('/ghost-login/:id', verifyTokenAndAdmin, async (req, res) => {
   try {
-    // 1. Admin ට ඕන කරන User ව හොයාගන්නවා
     const user = await User.findById(req.params.id);
     if (!user) return res.status(404).json("User not found!");
 
-    // 2. ඒ User වෙනුවෙන් අලුත් Token එකක් Sign කරනවා (Password ඕන නෑ)
     const accessToken = jwt.sign(
-      { id: user._id, role: user.role }, // User ගේ ID සහ Role එක දානවා
-      process.env.JWT_SECRET,
+      { id: user._id, role: user.role },
+      process.env.JWT_SEC, // JWT_SECRET වෙනුවට JWT_SEC දැම්මා (.env එකට ගැලපෙන්න)
       { expiresIn: "3d" }
     );
 
-    // 3. User ගේ විස්තර සහ Token එක Admin ට යවනවා
     const { password, ...others } = user._doc;
     res.status(200).json({ ...others, accessToken });
 
@@ -95,17 +97,24 @@ router.post('/ghost-login/:id', verifyTokenAndAdmin, async (req, res) => {
   }
 });
 
-const SystemLog = require('../models/SystemLog');
-
-// Get All System Logs (Admin Only)
-router.get('/logs', verifyTokenAndAdmin, async (req, res) => {
-    try {
-        const logs = await SystemLog.find().sort({ createdAt: -1 }).limit(50); // අන්තිම 50 විතරයි ගන්නේ
-        res.status(200).json(logs);
-    } catch (err) {
-        res.status(500).json(err);
-    }
+// 6. GET ALL USERS (Settings Page එකට)
+router.get("/", verifyTokenAndAdmin, async (req, res) => {
+  try {
+    const users = await User.find().sort({ _id: -1 });
+    res.status(200).json(users);
+  } catch (err) {
+    res.status(500).json(err);
+  }
 });
 
+// 7. DELETE USER (Settings Page එකට)
+router.delete("/:id", verifyTokenAndAdmin, async (req, res) => {
+  try {
+    await User.findByIdAndDelete(req.params.id);
+    res.status(200).json("User has been deleted...");
+  } catch (err) {
+    res.status(500).json(err);
+  }
+});
 
 module.exports = router;

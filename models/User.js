@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
 
 const UserSchema = new mongoose.Schema({
   name: { type: String, required: true },
@@ -6,20 +6,19 @@ const UserSchema = new mongoose.Schema({
   password: { type: String, required: true },
   role: { 
     type: String, 
-    enum: ['admin', 'user'], // admin = Super Admin, user = Business Owner
+    enum: ['admin', 'user', 'agent'], // 'agent' එකතු කළා
     default: 'user' 
   },
-  // Business details for users
+  status: { type: String, default: 'active' },
   businessName: { type: String },
-  phone: { type: String, default: "" },
-  status: { type: String, enum: ['active', 'inactive'], default: 'active' },
+  phone: { type: String },
+  
+  // ✅ අලුත් කෑල්ල: Agent කෙනෙක් නම්, එයා අයිති කාටද (Client ID)
+  ownerId: { 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'User',
+    default: null 
+  }
+}, { timestamps: true });
 
-  whatsappConfig: {
-    phoneNumberId: { type: String, default: "" }, // Meta Phone Number ID
-    accessToken: { type: String, default: "" },   // Meta Permanent Access Token
-    businessAccountId: { type: String, default: "" } // (Optional) Business ID
-  },
-  createdAt: { type: Date, default: Date.now }
-});
-
-module.exports = mongoose.model('User', UserSchema);
+module.exports = mongoose.model("User", UserSchema);
