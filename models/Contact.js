@@ -1,33 +1,29 @@
 const mongoose = require("mongoose");
 
 const ContactSchema = new mongoose.Schema({
-  phoneNumber: { type: String, required: true }, // WhatsApp Number
-  name: { type: String, default: "Unknown" }, // WhatsApp Name
-  
-  // මේ Contact එක අයිති මොන Business (Client) එකටද?
+  phoneNumber: { type: String, required: true },
+  name: { type: String, default: "Student" },
   ownerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-
-  // මේ Contact එක බාර දීලා තියෙන්නේ මොන Agent ට ද?
   assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
 
-  // CRM Data
-  status: { 
+  // Call Report Data
+  callStatus: { 
     type: String, 
-    enum: ['New', 'Answered', 'No Answer', 'Rejected', 'Pending'], 
-    default: 'New' 
+    enum: ['Pending', 'Answered', 'No Answer', 'Reject', 'Call Later'], 
+    default: 'Pending' 
   },
+
+  // Auto Priority Logic සඳහා
+  messageCount: { type: Number, default: 1 }, // මැසේජ් කීයක් එව්වද?
   priority: { 
     type: String, 
     enum: ['High', 'Medium', 'Low'], 
-    default: 'Medium' 
+    default: 'Low' // 1 Message = Low, >1 = High (Logic එක Webhook එකේ ලියන්න ඕන)
   },
-  remarks: { type: String, default: "" }, // Agent දාන Notes
-  lastMessage: { type: String, default: "" },
-  lastMessageTime: { type: Date, default: Date.now },
 
+  lastMessage: { type: String },
+  lastMessageTime: { type: Date, default: Date.now },
 }, { timestamps: true });
 
-// එක Client කෙනෙක්ට එක නම්බර් එකක් දෙපාරක් Save නොවෙන්න
 ContactSchema.index({ phoneNumber: 1, ownerId: 1 }, { unique: true });
-
 module.exports = mongoose.model("Contact", ContactSchema);

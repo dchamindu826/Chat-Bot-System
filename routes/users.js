@@ -3,7 +3,7 @@ const User = require('../models/User');
 const BotConfig = require('../models/BotConfig');
 const SystemLog = require('../models/SystemLog');
 const { verifyTokenAndAdmin } = require('../verifyToken');
-const CryptoJS = require("crypto-js"); // bcrypt වෙනුවට crypto-js දැම්මා
+const CryptoJS = require("crypto-js");
 const jwt = require("jsonwebtoken");
 
 // 1. GET ALL CLIENTS
@@ -20,10 +20,9 @@ router.get('/clients', verifyTokenAndAdmin, async (req, res) => {
   }
 });
 
-// 2. CREATE CLIENT
+// 2. CREATE CLIENT (Updated to save WhatsApp Config)
 router.post('/client', verifyTokenAndAdmin, async (req, res) => {
     try {
-        // Password Encrypt using CryptoJS (To match auth.js login)
         const encryptedPassword = CryptoJS.AES.encrypt(
           req.body.password,
           process.env.PASS_SEC
@@ -36,8 +35,12 @@ router.post('/client', verifyTokenAndAdmin, async (req, res) => {
             role: 'user',
             businessName: req.body.businessName,
             phone: req.body.phone,
-            status: 'active'
+            status: 'active',
+            
+            // ✅ MEKA ADD KALA: Aluth client kenek hadaddima API keys save wenna
+            whatsappConfig: req.body.whatsappConfig 
         });
+        
         const savedUser = await newUser.save();
         res.status(200).json(savedUser);
     } catch (err) {
@@ -45,7 +48,7 @@ router.post('/client', verifyTokenAndAdmin, async (req, res) => {
     }
 });
 
-// 3. UPDATE CLIENT
+// 3. UPDATE CLIENT (Already correct, but good to double check)
 router.put('/client/:id', verifyTokenAndAdmin, async (req, res) => {
   try {
     if (req.body.password) {
@@ -57,7 +60,9 @@ router.put('/client/:id', verifyTokenAndAdmin, async (req, res) => {
 
     const updatedUser = await User.findByIdAndUpdate(
       req.params.id,
-      { $set: req.body },
+      { 
+        $set: req.body // Meken whatsappConfig ekath auto update wenawa
+      },
       { new: true }
     );
     res.status(200).json(updatedUser);
@@ -77,7 +82,7 @@ router.delete('/client/:id', verifyTokenAndAdmin, async (req, res) => {
   }
 });
 
-// 5. GHOST LOGIN ROUTE (Super Admin Only)
+// 5. GHOST LOGIN ROUTE
 router.post('/ghost-login/:id', verifyTokenAndAdmin, async (req, res) => {
   try {
     const user = await User.findById(req.params.id);
@@ -85,7 +90,7 @@ router.post('/ghost-login/:id', verifyTokenAndAdmin, async (req, res) => {
 
     const accessToken = jwt.sign(
       { id: user._id, role: user.role },
-      process.env.JWT_SEC, // JWT_SECRET වෙනුවට JWT_SEC දැම්මා (.env එකට ගැලපෙන්න)
+      process.env.JWT_SEC,
       { expiresIn: "3d" }
     );
 
@@ -97,7 +102,7 @@ router.post('/ghost-login/:id', verifyTokenAndAdmin, async (req, res) => {
   }
 });
 
-// 6. GET ALL USERS (Settings Page එකට)
+// 6. GET ALL USERS
 router.get("/", verifyTokenAndAdmin, async (req, res) => {
   try {
     const users = await User.find().sort({ _id: -1 });
@@ -107,7 +112,7 @@ router.get("/", verifyTokenAndAdmin, async (req, res) => {
   }
 });
 
-// 7. DELETE USER (Settings Page එකට)
+// 7. DELETE USER
 router.delete("/:id", verifyTokenAndAdmin, async (req, res) => {
   try {
     await User.findByIdAndDelete(req.params.id);

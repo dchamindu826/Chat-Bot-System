@@ -1,22 +1,22 @@
 const router = require('express').Router();
 const Contact = require('../models/Contact');
 const Message = require('../models/Message');
-const User = require('../models/User');
 const { verifyToken } = require('../verifyToken');
 
 // 1. GET ALL CONTACTS (With Filters)
 router.get('/contacts', verifyToken, async (req, res) => {
   try {
-    let query = { ownerId: req.user.id }; // Client ට අදාල ඒවා විතරයි
-
-    // Filters (Frontend එකෙන් එවන විදියට)
-    if (req.query.status) query.status = req.query.status;
-    if (req.query.agentId) query.assignedTo = req.query.agentId;
-    if (req.query.priority) query.priority = req.query.priority;
+    // Agent කෙනෙක් නම් එයාගේ Leads විතරයි, Client නම් ඔක්කොම
+    let query = { ownerId: req.user.id }; 
+    
+    // Agent View එක සඳහා (UserAgentDash.jsx එකෙන් එවන query එක)
+    if (req.query.agentId) {
+       query = { assignedTo: req.query.agentId };
+    }
 
     const contacts = await Contact.find(query)
-      .populate('assignedTo', 'name') // Agent ගේ නම පෙන්නන්න
-      .sort({ lastMessageTime: -1 }); // අලුත් ඒවා උඩින්
+      .populate('assignedTo', 'name')
+      .sort({ lastMessageTime: -1 });
 
     res.status(200).json(contacts);
   } catch (err) {
@@ -24,25 +24,24 @@ router.get('/contacts', verifyToken, async (req, res) => {
   }
 });
 
-// 2. GET MESSAGES FOR A CONTACT
+// 2. GET MESSAGES
 router.get('/messages/:contactId', verifyToken, async (req, res) => {
   try {
-    const messages = await Message.find({ contactId: req.params.contactId })
-      .sort({ createdAt: 1 }); // පරණ ඒවා උඩින්
+    const messages = await Message.find({ contactId: req.params.contactId }).sort({ createdAt: 1 });
     res.status(200).json(messages);
   } catch (err) {
     res.status(500).json(err);
   }
 });
 
-// 3. UPDATE CONTACT STATUS / PRIORITY / AGENT
+// 3. UPDATE CONTACT
 router.put('/contact/:id', verifyToken, async (req, res) => {
   try {
     const updatedContact = await Contact.findByIdAndUpdate(
       req.params.id,
       { $set: req.body },
       { new: true }
-    ).populate('assignedTo', 'name');
+    );
     res.status(200).json(updatedContact);
   } catch (err) {
     res.status(500).json(err);
