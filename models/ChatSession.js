@@ -1,17 +1,13 @@
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
 
 const ChatSessionSchema = new mongoose.Schema({
-  userId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
-  }, // Client ID (Business Owner)
-  phoneNumber: { type: String, required: true }, // Customer's Phone Number
-  currentStep: { type: Number, default: 0 }, // 0 = 1st reply, 1 = 2nd reply...
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true }, // Client ID
+  phoneNumber: { type: String, required: true }, // Customer Phone
+  currentStep: { type: Number, default: 0 }, // දැනට ඉන්න පියවර (0, 1, 2...)
   lastActive: { type: Date, default: Date.now }
 }, { timestamps: true });
 
-// Compound index to ensure unique session per user per customer
+// එක් Client කෙනෙක්ට එක් Number එකකින් එක Session එකයි තියෙන්න පුළුවන්
 ChatSessionSchema.index({ userId: 1, phoneNumber: 1 }, { unique: true });
 
-module.exports = mongoose.model('ChatSession', ChatSessionSchema);
+module.exports = mongoose.model("ChatSession", ChatSessionSchema);

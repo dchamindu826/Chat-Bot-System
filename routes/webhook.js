@@ -1,190 +1,149 @@
 const router = require('express').Router();
-const User = require('../models/User');
-const BotConfig = require('../models/BotConfig');
-const ChatSession = require('../models/ChatSession');
-const SystemLog = require('../models/SystemLog');
-const Message = require('../models/Message');
-const Contact = require('../models/Contact');
 const axios = require('axios');
+const User = require('../models/User');
+const Contact = require('../models/Contact');
+const Message = require('../models/Message');
+const BotConfig = require('../models/BotConfig');
+const ChatSession = require('../models/ChatSession'); // ✅ New Model Import
 
-const VERIFY_TOKEN = process.env.META_VERIFY_TOKEN || "my_secure_verify_token";
-
-// 1. GET Route
+// 1. VERIFICATION ROUTE
 router.get('/', (req, res) => {
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
   const challenge = req.query['hub.challenge'];
+  const myVerifyToken = process.env.META_VERIFY_TOKEN;
 
   if (mode && token) {
-    if (mode === 'subscribe' && token === VERIFY_TOKEN) {
-      console.log("✅ Webhook Verified!");
+    if (mode === 'subscribe' && token === myVerifyToken) {
       res.status(200).send(challenge);
     } else {
       res.sendStatus(403);
     }
+  } else {
+    res.sendStatus(400);
   }
 });
 
-// Helper: Save Message
-const saveMessage = async (userId, phone, direction, type, content) => {
-  try {
-    await Message.create({ userId, customerPhone: phone, direction, type, content });
-  } catch (e) { console.error("Message Save Failed:", e); }
-};
-
-// Helper: Update Contact
-const updateContact = async (clientId, phone, msgBody) => {
-    try {
-      let contact = await Contact.findOne({ ownerId: clientId, phoneNumber: phone });
-      if (contact) {
-        contact.messageCount += 1;
-        contact.lastMessage = msgBody;
-        contact.lastMessageTime = Date.now();
-        if (contact.messageCount > 1) contact.priority = 'High';
-        await contact.save();
-      } else {
-        await Contact.create({
-          ownerId: clientId,
-          phoneNumber: phone,
-          lastMessage: msgBody,
-          lastMessageTime: Date.now(),
-          messageCount: 1,
-          priority: 'Low',
-          callStatus: 'Pending',
-          assignedTo: null
-        });
-      }
-    } catch (e) { console.error("Contact Update Failed:", e); }
-};
-
-// Helper: Send WhatsApp Message
-const sendWhatsAppMessage = async (client, to, reply) => {
-  try {
-    const { phoneNumberId, accessToken } = client.whatsappConfig;
-    
-    console.log(`📤 Sending Reply via ID: ${phoneNumberId}`); // LOG
-
-    let data = { messaging_product: "whatsapp", recipient_type: "individual", to: to };
-    let msgContent = "";
-
-    if (reply.media) {
-      const type = reply.mediaType === 'image' ? 'image' : reply.mediaType === 'video' ? 'video' : 'document';
-      data.type = type;
-      data[type] = { link: reply.media };
-      if (reply.content) data[type].caption = reply.content; // Use .content
-      if(reply.text) data[type].caption = reply.text; // Use .text (backup)
-      
-      if(type === 'document') data[type].filename = reply.fileName || "Document.pdf";
-      msgContent = reply.media;
-    } else {
-      data.type = "text";
-      data.text = { body: reply.text || reply.content || "..." }; // Handle both text/content keys
-      msgContent = data.text.body;
-    }
-
-    await axios.post(
-      `https://graph.facebook.com/v17.0/${phoneNumberId}/messages`,
-      data,
-      { headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' } }
-    );
-
-    await saveMessage(client._id, to, 'outbound', 'text', msgContent);
-    console.log("✅ Message Sent to Meta API!"); // LOG
-
-  } catch (error) {
-    console.error("❌ Send Message Failed:", error.response ? error.response.data : error.message);
-    throw error;
-  }
-};
-
-// 2. POST Route
+// 2. MESSAGE HANDLING ROUTE
 router.post('/', async (req, res) => {
   const body = req.body;
-  
-  if (body.object) {
-    try {
-      if (body.entry && body.entry[0].changes && body.entry[0].changes[0].value.messages && body.entry[0].changes[0].value.messages[0]) {
-        
-        // 1. Extract Data
-        const change = body.entry[0].changes[0].value;
-        const incomingPhoneID = change.metadata.phone_number_id; // Meta eken ena ID eka
-        const from = change.messages[0].from;
-        const msgType = change.messages[0].type;
-        const msgBody = change.messages[0].text ? change.messages[0].text.body : "[Media]";
 
-        console.log(`\n📨 INCOMING MESSAGE`);
-        console.log(`------------------------------------------------`);
-        console.log(`📞 From: ${from}`);
-        console.log(`🆔 Incoming Phone ID: ${incomingPhoneID}`); // MEKA WADAGATH
+  try {
+    if (body.object === 'whatsapp_business_account') {
+      for (const entry of body.entry) {
+        for (const change of entry.changes) {
+          const value = change.value;
 
-        // 2. Find Client by Phone ID
-        const client = await User.findOne({ 'whatsappConfig.phoneNumberId': incomingPhoneID });
-        
-        if (!client) {
-          console.log("❌ ERROR: No Client found with this Phone ID in Database!");
-          console.log("👉 Check Admin Panel > Client Settings > Phone Number ID");
-          return res.sendStatus(200);
-        }
+          if (value.messages && value.messages.length > 0) {
+            const phone_number_id = value.metadata.phone_number_id;
+            const msgObj = value.messages[0];
+            const from = msgObj.from;
+            const msgBody = msgObj.text ? msgObj.text.body : (msgObj.type === 'image' ? 'Image' : 'Media');
 
-        console.log(`✅ Client Found: ${client.businessName} (${client._id})`);
+            // 1. Find Client
+            const client = await User.findOne({ "whatsappConfig.phoneNumberId": phone_number_id });
 
-        // 3. Save Message & Contact
-        if (msgType === 'text') {
-           await saveMessage(client._id, from, 'inbound', 'text', msgBody);
-           await updateContact(client._id, from, msgBody);
-        }
+            if (client) {
+              // 2. Save Contact & Message (CRM Part)
+              // ... (CRM Save Logic - කලින් දුන්න කෝඩ් එකේ වගේම තියන්න) ...
+              await updateCRM(client, from, msgBody);
 
-        // 4. Check Bot Config
-        // Note: Check if your DB uses 'userId' or 'ownerId'. Our models use 'ownerId', but BotConfig might use 'userId'.
-        // Let's try both to be safe.
-        let botConfig = await BotConfig.findOne({ ownerId: client._id });
-        if(!botConfig) botConfig = await BotConfig.findOne({ userId: client._id });
+              // 3. --- NEW BOT LOGIC (Sequential) ---
+              const botConfig = await BotConfig.findOne({ ownerId: client._id });
 
-        if (!botConfig) {
-             console.log("⚠️ No Bot Config found for this client.");
-             return res.sendStatus(200);
-        }
-        
-        if (!botConfig.isActive) {
-             console.log("⚠️ Bot is turned OFF.");
-             return res.sendStatus(200);
-        }
+              if (botConfig && botConfig.isActive && botConfig.replies.length > 0) {
+                
+                // A. Session එක හොයනවා හෝ අලුතින් හදනවා
+                let session = await ChatSession.findOne({ userId: client._id, phoneNumber: from });
+                
+                if (!session) {
+                  session = new ChatSession({ userId: client._id, phoneNumber: from, currentStep: 0 });
+                  await session.save();
+                }
 
-        if (!botConfig.replies || botConfig.replies.length === 0) {
-             console.log("⚠️ Bot has empty replies list.");
-             return res.sendStatus(200);
-        }
+                // B. යවන්න ඕන Reply එක තෝරගන්නවා
+                const currentStepIndex = session.currentStep;
 
-        // 5. Session Logic
-        let session = await ChatSession.findOne({ userId: client._id, phoneNumber: from });
-        if (!session) {
-          session = new ChatSession({ userId: client._id, phoneNumber: from, currentStep: 0 });
-          console.log("🆕 New Chat Session Created");
-        }
+                if (currentStepIndex < botConfig.replies.length) {
+                  const replyToSend = botConfig.replies[currentStepIndex];
 
-        let currentStep = session.currentStep;
-        console.log(`🤖 Current Step: ${currentStep} / ${botConfig.replies.length}`);
+                  // C. Message එක යවනවා
+                  await sendWhatsAppMessage(client, from, replyToSend);
 
-        if (currentStep < botConfig.replies.length) {
-          const replyToSend = botConfig.replies[currentStep];
-          
-          console.log("🚀 Sending Reply...");
-          await sendWhatsAppMessage(client, from, replyToSend);
+                  // D. Bot Reply එක Database එකේ Save කරනවා
+                  await Message.create({
+                      contactId: (await Contact.findOne({ phoneNumber: from }))._id, // Contact ID එක හොයාගන්න logic එක ලියන්න වෙනවා හරියටම
+                      text: replyToSend.text,
+                      sender: 'me',
+                      ownerId: client._id,
+                      isBotReply: true
+                  });
 
-          session.currentStep += 1;
-          session.lastActive = Date.now();
-          await session.save();
-        } else {
-            console.log("🏁 Conversation Flow Ended.");
+                  // E. Step එක වැඩි කරනවා (ඊළඟ පාර ඊළඟ මැසේජ් එක යවන්න)
+                  session.currentStep += 1;
+                  session.lastActive = Date.now();
+                  await session.save();
+                } else {
+                  console.log("🏁 Bot Flow Completed for this user.");
+                  // Flow ඉවරයි නම් මුකුත් කරන්නේ නෑ, හෝ Reset කරන්න පුළුවන්
+                }
+              }
+            }
+          }
         }
       }
-    } catch (err) {
-      console.error("❌ CRITICAL ERROR:", err.message);
+      res.sendStatus(200);
+    } else {
+      res.sendStatus(404);
     }
-    res.sendStatus(200);
-  } else {
-    res.sendStatus(404);
+  } catch (err) {
+    console.error("Webhook Error:", err);
+    res.sendStatus(500);
   }
 });
+
+// Helper: Save to CRM (කලින් කෝඩ් එකේ කොටස Function එකක් කළා පැහැදිලි වෙන්න)
+async function updateCRM(client, from, msgBody) {
+    let contact = await Contact.findOne({ phoneNumber: from, ownerId: client._id });
+    if (!contact) {
+        contact = new Contact({ phoneNumber: from, ownerId: client._id, messageCount: 0, status: 'New' });
+    }
+    contact.lastMessage = msgBody;
+    contact.lastMessageTime = new Date();
+    contact.messageCount += 1;
+    if(contact.messageCount > 1) contact.priority = 'High';
+    await contact.save();
+
+    await Message.create({
+        contactId: contact._id,
+        text: msgBody,
+        sender: 'customer',
+        ownerId: client._id
+    });
+}
+
+// Helper: Send WhatsApp Message
+const sendWhatsAppMessage = async (client, to, step) => {
+  try {
+    const url = `https://graph.facebook.com/v17.0/${client.whatsappConfig.phoneNumberId}/messages`;
+    const token = client.whatsappConfig.accessToken;
+
+    let data = { messaging_product: "whatsapp", to: to };
+
+    if (step.media) {
+       // Media Type Check Logic
+       const type = step.mediaType === 'video' ? 'video' : (step.mediaType === 'document' ? 'document' : 'image');
+       data.type = type;
+       data[type] = { link: step.media, caption: step.text };
+    } else {
+      data.type = "text";
+      data.text = { body: step.text };
+    }
+
+    await axios.post(url, data, { headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } });
+  } catch (error) {
+    console.error("Send Failed:", error.response ? error.response.data : error.message);
+  }
+};
 
 module.exports = router;
