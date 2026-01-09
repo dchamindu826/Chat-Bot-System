@@ -4,13 +4,10 @@ const Message = require('../models/Message');
 const User = require('../models/User');
 const SystemLog = require('../models/SystemLog');
 const Contact = require('../models/Contact');
-const { verifyTokenAndAdmin, verifyToken } = require('../verifyToken');
+// ✅ Fix: Imports hariyata damma
+const { verifyTokenAndAdmin, verifyToken, verifyTokenAndAuthorization } = require('../verifyToken');
 
-// ==========================================
-// 🛡️ ADMIN PANEL ROUTES (Super Admin Only)
-// ==========================================
-
-// 1. ADMIN OVERVIEW (Dashboard Cards & Charts)
+// 1. ADMIN OVERVIEW
 router.get('/overview', verifyTokenAndAdmin, async (req, res) => {
   try {
     const activeClients = await User.countDocuments({ role: 'user' }); 
@@ -59,7 +56,7 @@ router.get('/overview', verifyTokenAndAdmin, async (req, res) => {
   }
 });
 
-// 2. ADMIN SYSTEM LOGS (Log Table)
+// 2. ADMIN LOGS
 router.get('/logs', verifyTokenAndAdmin, async (req, res) => {
   try {
     const logs = await SystemLog.find()
@@ -73,17 +70,12 @@ router.get('/logs', verifyTokenAndAdmin, async (req, res) => {
   }
 });
 
-// ==========================================
-// 👤 USER DASHBOARD ROUTES (Client & Agents)
-// ==========================================
-
-// 3. USER DASHBOARD CARDS (User Only)
+// 3. USER DASHBOARD STATS
 router.get('/user-stats', verifyToken, async (req, res) => {
   try {
     const totalCalls = await Contact.countDocuments({ ownerId: req.user.id });
     const totalMessages = await Message.countDocuments({ ownerId: req.user.id });
     
-    // Response Rate Calculation
     const assignedContacts = await Contact.countDocuments({ ownerId: req.user.id, assignedTo: { $ne: null } });
     const answeredContacts = await Contact.countDocuments({ ownerId: req.user.id, callStatus: 'Answered' });
     const responseRate = assignedContacts > 0 ? ((answeredContacts / assignedContacts) * 100).toFixed(1) : 0;
@@ -92,7 +84,7 @@ router.get('/user-stats', verifyToken, async (req, res) => {
   } catch (err) { res.status(500).json(err); }
 });
 
-// 4. AGENT PERFORMANCE REPORT (User Dashboard Table)
+// 4. AGENT PERFORMANCE
 router.get('/agent-performance', verifyToken, async (req, res) => {
   try {
     const stats = await Contact.aggregate([
@@ -114,10 +106,7 @@ router.get('/agent-performance', verifyToken, async (req, res) => {
     ]);
 
     const formattedStats = stats.map(stat => {
-        const responseRate = stat.totalAllocated > 0 
-            ? ((stat.answered / stat.totalAllocated) * 100).toFixed(1) 
-            : 0;
-
+        const responseRate = stat.totalAllocated > 0 ? ((stat.answered / stat.totalAllocated) * 100).toFixed(1) : 0;
         return {
             id: stat._id,
             agentName: stat.agentInfo ? stat.agentInfo.name : "Unassigned Pool",
@@ -132,6 +121,7 @@ router.get('/agent-performance', verifyToken, async (req, res) => {
 
     res.status(200).json(formattedStats);
   } catch (err) {
+    console.error(err);
     res.status(500).json(err);
   }
 });

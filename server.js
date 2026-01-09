@@ -12,9 +12,11 @@ const logsRoute = require("./routes/logs");
 const messageRoute = require("./routes/messages");
 const analyticsRoute = require("./routes/analytics");
 const teamRoute = require('./routes/team');
-const crmRoute = require("./routes/crm"); // ✅ CRM Route එක හරියටම Import කළා
+const crmRoute = require("./routes/crm");
 
+// ✅ .env config eka udinma thiyenna one
 dotenv.config();
+
 const app = express();
 
 // --- CORS FIX ---
@@ -45,7 +47,7 @@ app.use("/api/logs", logsRoute);
 app.use("/api/messages", messageRoute);
 app.use("/api/analytics", analyticsRoute);
 app.use("/api/team", teamRoute);
-app.use("/api/crm", crmRoute); // ✅ CRM Route එක Use කළා
+app.use("/api/crm", crmRoute);
 
 // 404 handler
 app.use((req, res) => {

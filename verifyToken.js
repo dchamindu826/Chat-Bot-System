@@ -1,26 +1,26 @@
-const jwt = require('jsonwebtoken');
+const jwt = require("jsonwebtoken");
 
-// 1. Token එක හරිද බලන Function එක
+// 1. Verify Token Only (Login wela innawada balanna)
 const verifyToken = (req, res, next) => {
   const authHeader = req.headers.token;
-  
   if (authHeader) {
-    const token = authHeader.split(" ")[1]; 
-
-    jwt.verify(token, process.env.JWT_SEC, (err, user) => { // JWT_SEC දැම්මා
+    const token = authHeader.split(" ")[1];
+    
+    // Oya dunna .env eke thiyeana JWT_SEC key eka methana use wenawa
+    jwt.verify(token, process.env.JWT_SEC, (err, user) => {
       if (err) return res.status(403).json("Token is not valid!");
       req.user = user;
-      next(); 
+      next();
     });
   } else {
     return res.status(401).json("You are not authenticated!");
   }
 };
 
-// 2. Token එක සහ Authorization බලන Function එක (Update/Delete වලට)
+// 2. Verify Token & Authorization (Owner or Admin)
 const verifyTokenAndAuthorization = (req, res, next) => {
   verifyToken(req, res, () => {
-    if (req.user.id === req.params.id || req.user.role === 'admin') {
+    if (req.user.id === req.params.id || req.user.role === "admin") {
       next();
     } else {
       res.status(403).json("You are not allowed to do that!");
@@ -28,15 +28,19 @@ const verifyTokenAndAuthorization = (req, res, next) => {
   });
 };
 
-// 3. Admin ද කියලා බලන Function එක (Clients Page එකට)
+// 3. Verify Token & Admin (Admin Only)
 const verifyTokenAndAdmin = (req, res, next) => {
   verifyToken(req, res, () => {
-    if (req.user && req.user.role === 'admin') {
+    if (req.user && req.user.role === "admin") {
       next();
     } else {
-      return res.status(403).json("You are not allowed to do that! Admin access required.");
+      res.status(403).json("You are not allowed to do that!");
     }
   });
 };
 
-module.exports = { verifyToken, verifyTokenAndAuthorization, verifyTokenAndAdmin };
+module.exports = {
+  verifyToken,
+  verifyTokenAndAuthorization,
+  verifyTokenAndAdmin,
+};
