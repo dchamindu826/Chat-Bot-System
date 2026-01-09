@@ -1,35 +1,21 @@
-const router = require("express").Router();
-const User = require("../models/User");
-const { verifyTokenAndAuthorization, verifyToken } = require("../verifyToken");
-const CryptoJS = require("crypto-js");
+const mongoose = require("mongoose");
 
-// ... (Other routes like UPDATE, DELETE...)
+const UserSchema = new mongoose.Schema(
+  {
+    name: { type: String, required: true },
+    email: { type: String, required: true, unique: true },
+    password: { type: String, required: true },
+    role: { type: String, default: "user" }, // admin, business, user
+    businessName: { type: String, default: "" },
+    phone: { type: String, default: "" },
+    whatsappConfig: {
+      phoneNumberId: { type: String, default: "" },
+      accessToken: { type: String, default: "" },
+    },
+  },
+  { timestamps: true }
+);
 
-// ✅ 1. UPDATE WHATSAPP CONFIG (Client Settings Page එකෙන් Call කරන්න)
-router.put("/update-config", verifyToken, async (req, res) => {
-  try {
-    // Log වෙලා ඉන්න User (Client) ගේ ID එක
-    const userId = req.user.id; 
-    
-    // Frontend එකෙන් එවන Data
-    const { phoneNumberId, accessToken } = req.body;
-
-    // Database Update
-    const updatedUser = await User.findByIdAndUpdate(
-      userId,
-      {
-        $set: {
-          "whatsappConfig.phoneNumberId": phoneNumberId,
-          "whatsappConfig.accessToken": accessToken
-        }
-      },
-      { new: true } // අලුත් Data එක Return කරන්න
-    );
-
-    res.status(200).json(updatedUser);
-  } catch (err) {
-    res.status(500).json(err);
-  }
-});
-
-module.exports = router;
+// මෙන්න මේ පේළිය තමයි වැදගත්ම දේ!
+// ඔයාගේ පරණ code එකේ මෙතන { } වරහන් තිබ්බද දන්නෑ. ඒකයි කෙල වුනේ.
+module.exports = mongoose.model("User", UserSchema);
