@@ -1,20 +1,25 @@
-const router = require('express').Router();
-const axios = require('axios');
-const User = require('../models/User');
-const Contact = require('../models/Contact');
-const Message = require('../models/Message');
-const BotConfig = require('../models/BotConfig');
-const ChatSession = require('../models/ChatSession'); // ✅ New Model Import
+const router = require("express").Router();
+const axios = require("axios");
+const User = require("../models/User");
+const Contact = require("../models/Contact");
+const Message = require("../models/Message");
+const BotConfig = require("../models/BotConfig");
+const ChatSession = require("../models/ChatSession");
 
-// 1. VERIFICATION ROUTE
-router.get('/', (req, res) => {
-  const mode = req.query['hub.mode'];
-  const token = req.query['hub.verify_token'];
-  const challenge = req.query['hub.challenge'];
-  const myVerifyToken = process.env.META_VERIFY_TOKEN;
+// ==========================================
+// 1. VERIFICATION ROUTE (Meta එකෙන් Check කරන එක)
+// ==========================================
+router.get("/", (req, res) => {
+  const mode = req.query["hub.mode"];
+  const token = req.query["hub.verify_token"];
+  const challenge = req.query["hub.challenge"];
+
+  // .env එකේ නැත්නම් කෙලින්ම hardcode කරලා check කරගන්න පුළුවන් (Optional)
+  const myVerifyToken = process.env.VERIFY_TOKEN || "mysecrettoken";
 
   if (mode && token) {
-    if (mode === 'subscribe' && token === myVerifyToken) {
+    if (mode === "subscribe" && token === myVerifyToken) {
+      console.log("✅ Webhook Verified!");
       res.status(200).send(challenge);
     } else {
       res.sendStatus(403);
@@ -24,12 +29,14 @@ router.get('/', (req, res) => {
   }
 });
 
-// 2. MESSAGE HANDLING ROUTE
-router.post('/', async (req, res) => {
+// ==========================================
+// 2. MESSAGE HANDLING ROUTE (Main Logic 🧠)
+// ==========================================
+router.post("/", async (req, res) => {
   const body = req.body;
 
   try {
-    if (body.object === 'whatsapp_business_account') {
+    if (body.object === "whatsapp_business_account") {
       for (const entry of body.entry) {
         for (const change of entry.changes) {
           const value = change.value;
@@ -38,55 +45,95 @@ router.post('/', async (req, res) => {
             const phone_number_id = value.metadata.phone_number_id;
             const msgObj = value.messages[0];
             const from = msgObj.from;
-            const msgBody = msgObj.text ? msgObj.text.body : (msgObj.type === 'image' ? 'Image' : 'Media');
+            
+            // Message එක Text ද Media ද කියලා බලලා Body එක ගන්නවා
+            let msgBody = "Media File";
+            if (msgObj.type === "text") msgBody = msgObj.text.body;
+            else if (msgObj.type === "image") msgBody = "📷 Image Received";
+            else if (msgObj.type === "video") msgBody = "🎥 Video Received";
+            else if (msgObj.type === "document") msgBody = "📄 Document Received";
 
-            // 1. Find Client
+            // 1. මේ Phone ID එක අයිති Client (Admin User) හොයාගන්නවා
             const client = await User.findOne({ "whatsappConfig.phoneNumberId": phone_number_id });
 
             if (client) {
-              // 2. Save Contact & Message (CRM Part)
-              // ... (CRM Save Logic - කලින් දුන්න කෝඩ් එකේ වගේම තියන්න) ...
-              await updateCRM(client, from, msgBody);
+              
+              // ---------------------------------------------------------
+              // PART A: CRM UPDATE (Inbox එකට මැසේජ් එක දානවා)
+              // ---------------------------------------------------------
+              
+              // Contact එක හොයනවා හෝ අලුතින් හදනවා
+              let contact = await Contact.findOne({ phoneNumber: from, ownerId: client._id });
+              
+              if (!contact) {
+                contact = new Contact({
+                  phoneNumber: from,
+                  ownerId: client._id,
+                  name: `Guest ${from.slice(-4)}`, // නමක් නැති නිසා Guest කියල දානවා
+                  status: "New"
+                });
+              }
 
-              // 3. --- NEW BOT LOGIC (Sequential) ---
+              // Contact එක Update කරනවා
+              contact.lastMessage = msgBody;
+              contact.lastMessageTime = new Date();
+              contact.messageCount = (contact.messageCount || 0) + 1;
+              await contact.save();
+
+              // Message එක Save කරනවා (Customer එවපු එක)
+              await Message.create({
+                contactId: contact._id,
+                text: msgBody,
+                sender: "customer",
+                ownerId: client._id,
+                type: msgObj.type
+              });
+
+              // ---------------------------------------------------------
+              // PART B: BOT LOGIC (Auto Reply යවනවා) 🤖
+              // ---------------------------------------------------------
+
               const botConfig = await BotConfig.findOne({ ownerId: client._id });
 
+              // Bot එක ON ද සහ Replies තියෙනවද බලනවා
               if (botConfig && botConfig.isActive && botConfig.replies.length > 0) {
                 
-                // A. Session එක හොයනවා හෝ අලුතින් හදනවා
+                // 1. Session එක ගන්නවා (Customer කලින් කතා කරලද බලන්න)
                 let session = await ChatSession.findOne({ userId: client._id, phoneNumber: from });
-                
+
                 if (!session) {
+                  // කතා කරලා නැත්නම් අලුත් Session එකක් (Step 0)
                   session = new ChatSession({ userId: client._id, phoneNumber: from, currentStep: 0 });
-                  await session.save();
                 }
 
-                // B. යවන්න ඕන Reply එක තෝරගන්නවා
-                const currentStepIndex = session.currentStep;
+                // 2. යවන්න ඕන Step එක තෝරගන්නවා
+                let currentStepIndex = session.currentStep;
 
-                if (currentStepIndex < botConfig.replies.length) {
-                  const replyToSend = botConfig.replies[currentStepIndex];
-
-                  // C. Message එක යවනවා
-                  await sendWhatsAppMessage(client, from, replyToSend);
-
-                  // D. Bot Reply එක Database එකේ Save කරනවා
-                  await Message.create({
-                      contactId: (await Contact.findOne({ phoneNumber: from }))._id, // Contact ID එක හොයාගන්න logic එක ලියන්න වෙනවා හරියටම
-                      text: replyToSend.text,
-                      sender: 'me',
-                      ownerId: client._id,
-                      isBotReply: true
-                  });
-
-                  // E. Step එක වැඩි කරනවා (ඊළඟ පාර ඊළඟ මැසේජ් එක යවන්න)
-                  session.currentStep += 1;
-                  session.lastActive = Date.now();
-                  await session.save();
-                } else {
-                  console.log("🏁 Bot Flow Completed for this user.");
-                  // Flow ඉවරයි නම් මුකුත් කරන්නේ නෑ, හෝ Reset කරන්න පුළුවන්
+                // Step ගාන ඉවර නම් ආයේ මුල ඉඳන් (Loop) හෝ නවත්තන්න පුළුවන්.
+                // දැනට අපි Loop වෙන්න හදමු:
+                if (currentStepIndex >= botConfig.replies.length) {
+                    currentStepIndex = 0; 
+                    session.currentStep = 0; // Reset
                 }
+
+                const replyToSend = botConfig.replies[currentStepIndex];
+
+                // 3. WhatsApp Message එක යවනවා (Function එක පහළ තියෙනවා)
+                await sendWhatsAppMessage(client, from, replyToSend);
+
+                // 4. Bot යැව්ව මැසේජ් එකත් Inbox එකේ Save කරනවා (Admin ට පේන්න) ✅
+                await Message.create({
+                    contactId: contact._id,
+                    text: replyToSend.text || (replyToSend.media ? "Sent Media" : "Bot Reply"),
+                    sender: "me", // "me" කියන්නේ අපි (Bot එක)
+                    ownerId: client._id,
+                    isBotReply: true
+                });
+
+                // 5. ඊළඟ වතාවට Step එක වැඩි කරනවා
+                session.currentStep += 1;
+                session.lastActive = Date.now();
+                await session.save();
               }
             }
           }
@@ -102,47 +149,50 @@ router.post('/', async (req, res) => {
   }
 });
 
-// Helper: Save to CRM (කලින් කෝඩ් එකේ කොටස Function එකක් කළා පැහැදිලි වෙන්න)
-async function updateCRM(client, from, msgBody) {
-    let contact = await Contact.findOne({ phoneNumber: from, ownerId: client._id });
-    if (!contact) {
-        contact = new Contact({ phoneNumber: from, ownerId: client._id, messageCount: 0, status: 'New' });
-    }
-    contact.lastMessage = msgBody;
-    contact.lastMessageTime = new Date();
-    contact.messageCount += 1;
-    if(contact.messageCount > 1) contact.priority = 'High';
-    await contact.save();
-
-    await Message.create({
-        contactId: contact._id,
-        text: msgBody,
-        sender: 'customer',
-        ownerId: client._id
-    });
-}
-
-// Helper: Send WhatsApp Message
-const sendWhatsAppMessage = async (client, to, step) => {
+// ==========================================
+// 🛠️ HELPER FUNCTION: Send Message to WhatsApp
+// ==========================================
+const sendWhatsAppMessage = async (client, to, replyStep) => {
   try {
     const url = `https://graph.facebook.com/v17.0/${client.whatsappConfig.phoneNumberId}/messages`;
     const token = client.whatsappConfig.accessToken;
 
-    let data = { messaging_product: "whatsapp", to: to };
+    let body = {
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: to,
+    };
 
-    if (step.media) {
-       // Media Type Check Logic
-       const type = step.mediaType === 'video' ? 'video' : (step.mediaType === 'document' ? 'document' : 'image');
-       data.type = type;
-       data[type] = { link: step.media, caption: step.text };
+    // Media තියෙනවද බලනවා
+    if (replyStep.media && replyStep.media !== "") {
+      const type = replyStep.mediaType || "image"; // default to image
+      body.type = type;
+      
+      body[type] = {
+        link: replyStep.media,
+        caption: replyStep.text || "" // Media එක්ක යවන Text එක Caption වෙනවා
+      };
+
+      // Document එකක් නම් Filename එක ඕනේ
+      if (type === "document" && replyStep.fileName) {
+         body[type].filename = replyStep.fileName;
+      }
+
     } else {
-      data.type = "text";
-      data.text = { body: step.text };
+      // Text විතරක් නම්
+      body.type = "text";
+      body.text = { body: replyStep.text };
     }
 
-    await axios.post(url, data, { headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } });
+    await axios.post(url, body, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+    });
+
   } catch (error) {
-    console.error("Send Failed:", error.response ? error.response.data : error.message);
+    console.error("WhatsApp Send Failed:", error.response ? error.response.data : error.message);
   }
 };
 
