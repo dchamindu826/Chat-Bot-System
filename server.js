@@ -6,7 +6,7 @@ const dotenv = require('dotenv');
 // Routes Import
 const authRoute = require('./routes/auth');
 const userRoute = require('./routes/users');
-const botRoute = require('./routes/bot');
+const botRoute = require('./routes/bot'); // ෆයිල් එකේ නම bot.js ම තියෙන්න දෙන්න
 const webhookRoute = require('./routes/webhook');
 const logsRoute = require("./routes/logs");
 const messageRoute = require("./routes/messages");
@@ -14,12 +14,10 @@ const analyticsRoute = require("./routes/analytics");
 const teamRoute = require('./routes/team');
 const crmRoute = require("./routes/crm");
 
-// ✅ .env config eka udinma thiyenna one
 dotenv.config();
 
 const app = express();
 
-// --- CORS FIX ---
 app.use(cors({
     origin: ["http://localhost:5173", "https://chat-bot-system-frontend.vercel.app"],
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
@@ -38,10 +36,13 @@ app.get("/", (req, res) => {
   res.send("SmartReply CRM Backend is Running! 🚀");
 });
 
-// Routes Definitions
+// ✅ Routes Definitions (මෙතන තමයි වෙනස කළේ)
 app.use("/api/auth", authRoute);
 app.use("/api/users", userRoute);
-app.use("/api/bot", botRoute);
+
+// 👇 කලින් තිබුණේ "/api/bot" කියලා. දැන් ඒක මේ විදියට වෙනස් කරන්න:
+app.use("/api/bot-config", botRoute); 
+
 app.use("/api/webhook", webhookRoute);
 app.use("/api/logs", logsRoute);
 app.use("/api/messages", messageRoute);
