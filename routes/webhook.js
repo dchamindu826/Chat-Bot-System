@@ -31,11 +31,15 @@ router.get("/", (req, res) => {
 // 2. MESSAGE HANDLING ROUTE
 // ==========================================
 router.post("/", async (req, res) => {
-  // 🔥 DEBUG LOG: Capture OTP or Any Message
-  console.log("📩 INCOMING DATA:", JSON.stringify(req.body, null, 2));
+  // 🔥🔥🔥 1. මචං මුලින්ම ආපු හැමදේම Log කරමු (OTP එක අල්ලගන්න)
+  console.log("📩 RECEIVED_RAW_DATA:", JSON.stringify(req.body, null, 2));
 
-  if (JSON.stringify(req.body).includes("code") || JSON.stringify(req.body).includes("verification")) {
-      console.log("🚨 URGENT: OTP OR CODE DETECTED IN WEBHOOK!");
+  // 🔥🔥🔥 2. වහාම Facebook එකට OK එක යවමු (Timeout නොවී ඉන්න)
+  res.status(200).send("EVENT_RECEIVED");
+
+  // ඒ එක්කම Code එකක් තියෙනවද කියලා වෙනම බලමු
+  if (JSON.stringify(req.body).toLowerCase().includes("code") || JSON.stringify(req.body).toLowerCase().includes("verification")) {
+      console.log("🚨🚨🚨 ALERT: VERIFICATION CODE DETECTED IN DATA! 🚨🚨🚨");
   }
   
   const body = req.body;
