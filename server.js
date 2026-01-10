@@ -6,7 +6,7 @@ const dotenv = require('dotenv');
 // Routes Import
 const authRoute = require('./routes/auth');
 const userRoute = require('./routes/users');
-const botRoute = require('./routes/bot'); // ෆයිල් එකේ නම bot.js ම තියෙන්න දෙන්න
+const botRoute = require('./routes/bot'); // ⚠️ Note: File එකේ නම 'bot.js' ම විය යුතුයි
 const webhookRoute = require('./routes/webhook');
 const logsRoute = require("./routes/logs");
 const messageRoute = require("./routes/messages");
@@ -18,8 +18,9 @@ dotenv.config();
 
 const app = express();
 
+// CORS Settings - ඕනෑම තැනක ඉඳන් වැඩ කරන්න හදමු (Debugging ලේසි වෙන්න)
 app.use(cors({
-    origin: ["http://localhost:5173", "https://chat-bot-system-frontend.vercel.app"],
+    origin: "*", // මෙය ආරක්ෂිත නැතත් දැනට Error එක හොයාගන්න ලේසියි
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     credentials: true,
     allowedHeaders: ["Content-Type", "token", "Authorization"]
@@ -27,22 +28,39 @@ app.use(cors({
 
 app.use(express.json());
 
-// Database Connection
-mongoose.connect(process.env.MONGO_URL)
-  .then(() => console.log("DB Connection Successful! ✅"))
-  .catch((err) => console.log("DB Connection Error: ❌", err));
+// ✅ OPTIMIZED DATABASE CONNECTION (Timeout Fix)
+const connectDB = async () => {
+  try {
+    // දැනටමත් connect වෙලා නම් ආයේ හදන්න එපා
+    if (mongoose.connection.readyState === 1) {
+        console.log("Using existing DB connection ✅");
+        return;
+    }
+
+    await mongoose.connect(process.env.MONGO_URL, {
+      // Timeout settings වැඩි කරමු (තත්පර 60ක් දක්වා)
+      serverSelectionTimeoutMS: 60000, 
+      socketTimeoutMS: 60000,
+      family: 4 // IPv4 Force කරන්න (Vercel IP අවුල් මගහරින්න)
+    });
+
+    console.log("DB Connection Successful! ✅");
+  } catch (err) {
+    console.error("DB Connection Error: ❌", err);
+  }
+};
+
+// Server Run වෙද්දිම DB Connect කරන්න
+connectDB();
 
 app.get("/", (req, res) => {
   res.send("SmartReply CRM Backend is Running! 🚀");
 });
 
-// ✅ Routes Definitions (මෙතන තමයි වෙනස කළේ)
+// Routes Definitions
 app.use("/api/auth", authRoute);
 app.use("/api/users", userRoute);
-
-// 👇 කලින් තිබුණේ "/api/bot" කියලා. දැන් ඒක මේ විදියට වෙනස් කරන්න:
-app.use("/api/bot-config", botRoute); 
-
+app.use("/api/bot-config", botRoute); // Bot Route Link
 app.use("/api/webhook", webhookRoute);
 app.use("/api/logs", logsRoute);
 app.use("/api/messages", messageRoute);
