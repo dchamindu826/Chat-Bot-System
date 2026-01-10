@@ -9,7 +9,7 @@ const userRoute = require('./routes/users');
 const botRoute = require('./routes/bot'); // ⚠️ Note: File එකේ නම 'bot.js' ම විය යුතුයි (routes folder එකේ)
 const webhookRoute = require('./routes/webhook');
 const logsRoute = require("./routes/logs");
-const messageRoute = require("./routes/messages");
+const messagesRoute = require("./routes/messages");
 const analyticsRoute = require("./routes/analytics");
 const teamRoute = require('./routes/team');
 const crmRoute = require("./routes/crm");
@@ -66,7 +66,7 @@ app.use("/api/bot", botRoute);
 
 app.use("/api/webhook", webhookRoute);
 app.use("/api/logs", logsRoute);
-app.use("/api/messages", messageRoute);
+app.use("/api/messages", messagesRoute);
 app.use("/api/analytics", analyticsRoute);
 app.use("/api/team", teamRoute);
 app.use("/api/crm", crmRoute);
