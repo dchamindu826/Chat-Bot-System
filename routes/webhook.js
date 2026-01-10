@@ -1,10 +1,25 @@
 const router = require("express").Router();
 const axios = require("axios");
+const mongoose = require("mongoose"); // mongoose import කරන්න
 const User = require("../models/User");
 const Contact = require("../models/Contact");
 const Message = require("../models/Message");
 const BotConfig = require("../models/BotConfig");
 const ChatSession = require("../models/ChatSession");
+
+// 🔥 Vercel එකට අත්‍යවශ්‍ය DB Connect Function එක
+const connectDB = async () => {
+  try {
+    if (mongoose.connection.readyState === 1) {
+       return; // දැනටමත් Connect නම් මුකුත් කරන්න එපා
+    }
+    // Connect නැත්නම් අලුතෙන් Connect කරන්න
+    await mongoose.connect(process.env.MONGO_URL || process.env.MONGO_URI);
+    console.log("✅ MongoDB Re-Connected inside Webhook");
+  } catch (error) {
+    console.error("❌ DB Connection Error:", error);
+  }
+};
 
 // ==========================================
 // 1. VERIFICATION ROUTE
@@ -28,18 +43,18 @@ router.get("/", (req, res) => {
 });
 
 // ==========================================
-// 2. MESSAGE HANDLING ROUTE (DEBUG VERSION)
+// 2. MESSAGE HANDLING ROUTE
 // ==========================================
 router.post("/", async (req, res) => {
-  // 1. Log Raw Data
-  // console.log("📩 RECEIVED:", JSON.stringify(req.body, null, 2)); 
-  // (Log එක clean තියාගන්න මේක comment කළා, ඕනෙනම් Uncomment කරගන්න)
-  
+  // 🔥 1. Vercel Timeout නොවෙන්න මුලින්ම 200 යවමු
   res.status(200).send("EVENT_RECEIVED");
 
-  const body = req.body;
-
   try {
+    // 🔥 2. මෙන්න වැදගත්ම තැන: Database එකට Connect වෙලාද බලන්න
+    await connectDB();
+
+    const body = req.body;
+
     if (body.object === "whatsapp_business_account") {
       for (const entry of body.entry) {
         for (const change of entry.changes) {
@@ -57,14 +72,13 @@ router.post("/", async (req, res) => {
             console.log(`➡️ Message from ${from}: ${msgBody}`);
 
             // 1. Client Find
+            // දැන් DB connect වෙලා තියෙන නිසා මේක Fail වෙන්නේ නෑ
             const client = await User.findOne({ "whatsappConfig.phoneNumberId": phone_number_id });
 
             if (!client) {
                 console.error("❌ ERROR: No Client found for this Phone ID!");
-                continue; // Skip loop
+                continue; 
             }
-
-            console.log(`✅ Client Found: ${client.email} (ID: ${client._id})`);
 
             // ---------------------------------------------------------
             // PART A: CRM UPDATE
@@ -103,33 +117,18 @@ router.post("/", async (req, res) => {
             });
 
             // ---------------------------------------------------------
-            // PART B: BOT LOGIC (DEBUG MODE)
+            // PART B: BOT LOGIC
             // ---------------------------------------------------------
-            console.log("🤖 Checking Bot Config...");
             const botConfig = await BotConfig.findOne({ ownerId: client._id });
 
-            if (!botConfig) {
-                console.error(`❌ ERROR: Bot Config NOT FOUND for Owner ID: ${client._id}`);
-                // විසඳුම: Frontend එකට ගිහින් "Save Flow" ඔබන්න.
+            // Bot Config නැත්නම්, Active නැත්නම්, Replies නැත්නම් නවතින්න
+            if (!botConfig || !botConfig.isActive || !botConfig.replies || botConfig.replies.length === 0) {
                 continue;
             }
-
-            if (!botConfig.isActive) {
-                console.log("⚠️ Bot is disabled (isActive: false)");
-                continue;
-            }
-
-            if (!botConfig.replies || botConfig.replies.length === 0) {
-                console.log("⚠️ Bot has NO replies configured.");
-                continue;
-            }
-
-            console.log(`✅ Bot Config Loaded. Total Steps: ${botConfig.replies.length}`);
 
             let session = await ChatSession.findOne({ userId: client._id, phoneNumber: from });
 
             if (!session) {
-                console.log("🆕 New Session Created.");
                 session = new ChatSession({ userId: client._id, phoneNumber: from, currentStep: 0 });
             }
 
@@ -140,13 +139,10 @@ router.post("/", async (req, res) => {
                 session.currentStep = 0; 
             }
 
-            console.log(`ℹ️ Current Step for ${from}: ${session.currentStep}`);
-
             // CHECK STEPS
             if (session.currentStep < botConfig.replies.length) {
                 
                 const replyToSend = botConfig.replies[session.currentStep];
-                console.log(`📤 Sending Step ${session.currentStep + 1}: ${replyToSend.text}`);
 
                 await sendWhatsAppMessage(client, from, replyToSend);
 
@@ -162,21 +158,18 @@ router.post("/", async (req, res) => {
                 session.currentStep += 1;
                 session.lastActive = Date.now();
                 await session.save();
-                console.log(`✅ Moved to Next Step: ${session.currentStep}`);
 
             } else {
-                console.log(`🚫 STOPPED: All steps finished for ${from}. Waiting for Agent.`);
+                console.log(`🚫 STOPPED: All steps finished for ${from}.`);
             }
-          
           }
         }
       }
-    } else {
-      res.sendStatus(404);
     }
   } catch (err) {
-    console.error("❌ WEBHOOK CRASH:", err);
-    res.sendStatus(500);
+    console.error("❌ WEBHOOK CRASH FIXED:", err);
+    // 🔥 මෙතන res.sendStatus(500) දාන්න එපා. මොකද අපි උඩදීම 200 යැව්වා.
+    // ආයේ යවන්න ගියොත් තමයි "Headers Sent" error එක එන්නේ.
   }
 });
 
@@ -211,13 +204,12 @@ const sendWhatsAppMessage = async (client, to, replyStep) => {
       body.text = { body: replyStep.text };
     }
 
-    const response = await axios.post(url, body, {
+    await axios.post(url, body, {
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
       },
     });
-    // console.log("✅ Meta API Response:", response.data); 
 
   } catch (error) {
     console.error("❌ WhatsApp Send Failed:", error.response ? error.response.data : error.message);
