@@ -62,7 +62,7 @@ app.use("/api/auth", authRoute);
 app.use("/api/users", userRoute);
 
 // 👇 මෙන්න මේක වෙනස් කළා. Frontend එක ඉල්ලන්නේ "/api/bot" නිසා.
-app.use("/api/bot", botRoute); 
+app.use("/api/bot-config", botRoute);
 
 app.use("/api/webhook", webhookRoute);
 app.use("/api/logs", logsRoute);
