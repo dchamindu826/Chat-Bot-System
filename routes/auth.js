@@ -1,25 +1,21 @@
 const router = require("express").Router();
-const User = require('../models/User');
+const User = require("../models/User");
 const CryptoJS = require("crypto-js");
 const jwt = require("jsonwebtoken");
 
-// 1. REGISTER
+// REGISTER
 router.post("/register", async (req, res) => {
   try {
+    // Check if user exists
     const existingUser = await User.findOne({ email: req.body.email });
     if (existingUser) return res.status(400).json({ message: "Email already exists" });
-
-    const encryptedPassword = CryptoJS.AES.encrypt(
-      req.body.password,
-      process.env.PASS_SEC
-    ).toString();
 
     const newUser = new User({
       name: req.body.name,
       email: req.body.email,
-      password: encryptedPassword,
+      password: CryptoJS.AES.encrypt(req.body.password, process.env.PASS_SEC).toString(),
       role: req.body.role || 'user',
-      businessName: req.body.businessName || '',
+      businessName: req.body.businessName || '', 
       phone: req.body.phone || ''
     });
 
@@ -31,50 +27,47 @@ router.post("/register", async (req, res) => {
   }
 });
 
-// 2. LOGIN (Debug Version)
+// LOGIN (Updated with Better Error Handling)
 router.post("/login", async (req, res) => {
   try {
+    // 1. User ඉන්නවද බලන්න
     const user = await User.findOne({ email: req.body.email });
-    
     if (!user) {
-      return res.status(401).json({ message: "User not found!" });
+      return res.status(401).json({ message: "Wrong Credentials!" });
     }
 
-    // --- DECRYPTION CHECK START ---
+    // 2. Password Decrypt කරන්න (Try-Catch දාලා ආරක්ෂා කරමු)
     let originalPassword;
     try {
-        const hashedPassword = CryptoJS.AES.decrypt(
-          user.password, 
-          process.env.PASS_SEC
-        );
+        const hashedPassword = CryptoJS.AES.decrypt(user.password, process.env.PASS_SEC);
         originalPassword = hashedPassword.toString(CryptoJS.enc.Utf8);
-    } catch (decryptErr) {
-        console.error("Decryption Failed! Key mismatch potentially.");
-        return res.status(500).json({ message: "Password Error: Database keys mismatch. Please reset user." });
+    } catch (cryptoError) {
+        console.error("Decryption Error:", cryptoError);
+        return res.status(500).json({ message: "Password processing error. Check PASS_SEC in .env" });
     }
 
-    // Check if password is empty (Common issue if keys don't match)
-    if (!originalPassword) {
-        return res.status(500).json({ message: "Login Failed: Invalid Password Data in DB (Key Mismatch)" });
-    }
-    // --- DECRYPTION CHECK END ---
-
+    // 3. Password හරිද බලන්න
     if (originalPassword !== req.body.password) {
-      return res.status(401).json({ message: "Wrong Password!" });
+      return res.status(401).json({ message: "Wrong Credentials!" });
     }
 
+    // 4. Token එක හදන්න
     const accessToken = jwt.sign(
-      { id: user._id, role: user.role },
+      {
+        id: user._id,
+        role: user.role, // role එකත් token එකට දානවා
+      },
       process.env.JWT_SEC,
       { expiresIn: "3d" }
     );
 
+    // Password එක අයින් කරලා අනිත් ටික යවන්න
     const { password, ...others } = user._doc;
     res.status(200).json({ ...others, accessToken });
 
   } catch (err) {
-    console.error("Login Critical Error:", err);
-    res.status(500).json({ message: "Server Error", error: err.message });
+    console.error("Login Error:", err);
+    res.status(500).json({ message: "Internal Server Error", error: err.message });
   }
 });
 
