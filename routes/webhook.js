@@ -33,6 +33,10 @@ router.get("/", (req, res) => {
 router.post("/", async (req, res) => {
   // 🔥 DEBUG LOG: Capture OTP or Any Message
   console.log("📩 INCOMING DATA:", JSON.stringify(req.body, null, 2));
+
+  if (JSON.stringify(req.body).includes("code") || JSON.stringify(req.body).includes("verification")) {
+      console.log("🚨 URGENT: OTP OR CODE DETECTED IN WEBHOOK!");
+  }
   
   const body = req.body;
 
