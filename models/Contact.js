@@ -1,34 +1,29 @@
 const mongoose = require("mongoose");
 
-const ContactSchema = new mongoose.Schema(
-  {
-    phoneNumber: { type: String, required: true, unique: true },
-    name: { type: String },
-    email: { type: String },
-    
-    // --- ME FIELD EKA THAMA MISSED WELA THIBBE ---
-    assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
-    // ---------------------------------------------
+const ContactSchema = new mongoose.Schema({
+  phoneNumber: { type: String, required: true },
+  name: { type: String, default: "Student" },
+  ownerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
 
-    lastMessage: { type: String },
-    lastMessageTime: { type: Date, default: Date.now },
-    unreadCount: { type: Number, default: 0 },
-    
-    // Campaign Status Fields
-    callStatus: { 
-      type: String, 
-      enum: ['Pending', 'Answered', 'No Answer', 'Reject', 'Busy', 'Callback', 'Wrong Number'], 
-      default: 'Pending' 
-    },
-    attemptMethod: { type: String, default: '' }, // 3CX, WhatsApp, Direct
-    attemptCount: { type: Number, default: 0 },
-    priority: { type: String, enum: ['High', 'Mid', 'Low'], default: 'Low' },
-    remarks: { type: String, default: '' },
-    
-    tags: [{ type: String }],
-    customFields: { type: Map, of: String },
+  // Call Report Data
+  callStatus: { 
+    type: String, 
+    enum: ['Pending', 'Answered', 'No Answer', 'Reject', 'Call Later'], 
+    default: 'Pending' 
   },
-  { timestamps: true }
-);
 
+  // Auto Priority Logic සඳහා
+  messageCount: { type: Number, default: 1 }, // මැසේජ් කීයක් එව්වද?
+  priority: { 
+    type: String, 
+    enum: ['High', 'Medium', 'Low'], 
+    default: 'Low' // 1 Message = Low, >1 = High (Logic එක Webhook එකේ ලියන්න ඕන)
+  },
+
+  lastMessage: { type: String },
+  lastMessageTime: { type: Date, default: Date.now },
+}, { timestamps: true });
+
+ContactSchema.index({ phoneNumber: 1, ownerId: 1 }, { unique: true });
 module.exports = mongoose.model("Contact", ContactSchema);
