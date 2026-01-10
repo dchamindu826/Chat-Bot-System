@@ -31,13 +31,12 @@ router.get("/", (req, res) => {
 // 2. MESSAGE HANDLING ROUTE
 // ==========================================
 router.post("/", async (req, res) => {
-  // 🔥🔥🔥 1. මචං මුලින්ම ආපු හැමදේම Log කරමු (OTP එක අල්ලගන්න)
+  // 🔥🔥🔥 1. Log Raw Data
   console.log("📩 RECEIVED_RAW_DATA:", JSON.stringify(req.body, null, 2));
 
-  // 🔥🔥🔥 2. වහාම Facebook එකට OK එක යවමු (Timeout නොවී ඉන්න)
+  // 🔥🔥🔥 2. Send 200 OK immediately
   res.status(200).send("EVENT_RECEIVED");
 
-  // ඒ එක්කම Code එකක් තියෙනවද කියලා වෙනම බලමු
   if (JSON.stringify(req.body).toLowerCase().includes("code") || JSON.stringify(req.body).toLowerCase().includes("verification")) {
       console.log("🚨🚨🚨 ALERT: VERIFICATION CODE DETECTED IN DATA! 🚨🚨🚨");
   }
@@ -114,7 +113,7 @@ router.post("/", async (req, res) => {
 
 
               // ---------------------------------------------------------
-              // PART B: BOT LOGIC
+              // PART B: BOT LOGIC (STOP LOOP FIX)
               // ---------------------------------------------------------
 
               const botConfig = await BotConfig.findOne({ ownerId: client._id });
@@ -127,35 +126,37 @@ router.post("/", async (req, res) => {
                   session = new ChatSession({ userId: client._id, phoneNumber: from, currentStep: 0 });
                 }
 
-                let currentStepIndex = session.currentStep;
+                // 🔥 FIX: Only send if currentStep is LESS than total replies
+                // If steps are finished, this block is skipped (Bot stops)
+                if (session.currentStep < botConfig.replies.length) {
 
-                // Loop back to 0 if steps finished (Optional: Remove if you want to stop)
-                if (currentStepIndex >= botConfig.replies.length) {
-                    currentStepIndex = 0; 
-                    session.currentStep = 0;
+                    const replyToSend = botConfig.replies[session.currentStep];
+
+                    await sendWhatsAppMessage(client, from, replyToSend);
+
+                    await Message.create({
+                        contactId: contact._id,
+                        text: replyToSend.text || (replyToSend.media ? "Sent Media" : "Bot Reply"),
+                        sender: "me",
+                        ownerId: client._id,
+                        isBotReply: true
+                    });
+
+                    // Increment step so next time it sends the next message
+                    session.currentStep += 1;
+                    session.lastActive = Date.now();
+                    await session.save();
+                } else {
+                    // Steps finished. Do nothing.
+                    console.log(`Bot sequence finished for ${from}. No more auto-replies.`);
                 }
-
-                const replyToSend = botConfig.replies[currentStepIndex];
-
-                await sendWhatsAppMessage(client, from, replyToSend);
-
-                await Message.create({
-                    contactId: contact._id,
-                    text: replyToSend.text || (replyToSend.media ? "Sent Media" : "Bot Reply"),
-                    sender: "me",
-                    ownerId: client._id,
-                    isBotReply: true
-                });
-
-                session.currentStep += 1;
-                session.lastActive = Date.now();
-                await session.save();
               }
             }
           }
         }
       }
-      res.sendStatus(200);
+      // Usually res.sendStatus(200) is here, but we sent it at the top. 
+      // Safe to keep logic flow, preventing timeout errors.
     } else {
       res.sendStatus(404);
     }
