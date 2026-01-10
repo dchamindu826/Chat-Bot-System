@@ -3,13 +3,11 @@ const User = require("../models/User");
 const CryptoJS = require("crypto-js");
 const { verifyToken } = require("../verifyToken");
 
-// 1. ADD NEW AGENT (Client can add agents)
-router.post("/add", verifyToken, async (req, res) => {
+// 1. ADD NEW AGENT (Frontend calls: /api/team/add-agent)
+router.post("/add-agent", verifyToken, async (req, res) => {
   try {
-    // Agent ගේ Boss (Client) ගේ ID එක
     const ownerId = req.user.id;
-
-    // Email එක දැනටමත් තියෙනවද බලනවා
+    
     const existingUser = await User.findOne({ email: req.body.email });
     if (existingUser) return res.status(400).json({ message: "Email already exists!" });
 
@@ -17,15 +15,13 @@ router.post("/add", verifyToken, async (req, res) => {
       name: req.body.name,
       email: req.body.email,
       password: CryptoJS.AES.encrypt(req.body.password, process.env.PASS_SEC).toString(),
-      role: "agent", // Role එක Agent
+      role: "agent",
       phone: req.body.phone,
-      businessName: req.user.businessName || "Agent", // Boss ගේ Business Name එකම දාමු
-      ownerId: ownerId, // මේ Agent අයිති කාටද කියලා
+      businessName: req.user.businessName || "Agent",
+      ownerId: ownerId,
     });
 
     const savedAgent = await newAgent.save();
-    
-    // Password එක අයින් කරලා එවන්න
     const { password, ...others } = savedAgent._doc;
     res.status(201).json(others);
   } catch (err) {
@@ -33,10 +29,9 @@ router.post("/add", verifyToken, async (req, res) => {
   }
 });
 
-// 2. GET MY AGENTS
-router.get("/", verifyToken, async (req, res) => {
+// 2. GET AGENTS (Frontend calls: /api/team/agents)
+router.get("/agents", verifyToken, async (req, res) => {
   try {
-    // මගේ යටතේ ඉන්න (ownerId එක මගේ වුන) agents ලා ටික ගන්න
     const agents = await User.find({ ownerId: req.user.id });
     res.status(200).json(agents);
   } catch (err) {

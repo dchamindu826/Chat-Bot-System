@@ -6,7 +6,7 @@ const dotenv = require('dotenv');
 // Routes Import
 const authRoute = require('./routes/auth');
 const userRoute = require('./routes/users');
-const botRoute = require('./routes/bot'); // ⚠️ Note: File එකේ නම 'bot.js' ම විය යුතුයි
+const botRoute = require('./routes/bot'); // ⚠️ Note: File එකේ නම 'bot.js' ම විය යුතුයි (routes folder එකේ)
 const webhookRoute = require('./routes/webhook');
 const logsRoute = require("./routes/logs");
 const messageRoute = require("./routes/messages");
@@ -57,10 +57,13 @@ app.get("/", (req, res) => {
   res.send("SmartReply CRM Backend is Running! 🚀");
 });
 
-// Routes Definitions
+// ✅ Routes Definitions
 app.use("/api/auth", authRoute);
 app.use("/api/users", userRoute);
-app.use("/api/bot-config", botRoute); // Bot Route Link
+
+// 👇 මෙන්න මේක වෙනස් කළා. Frontend එක ඉල්ලන්නේ "/api/bot" නිසා.
+app.use("/api/bot", botRoute); 
+
 app.use("/api/webhook", webhookRoute);
 app.use("/api/logs", logsRoute);
 app.use("/api/messages", messageRoute);
