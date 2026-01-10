@@ -31,6 +31,7 @@ router.get("/", (req, res) => {
 // 2. MESSAGE HANDLING ROUTE
 // ==========================================
 router.post("/", async (req, res) => {
+  console.log("📩 INCOMING DATA:", JSON.stringify(req.body, null, 2));
   const body = req.body;
 
   try {
