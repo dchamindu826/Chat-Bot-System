@@ -57,7 +57,7 @@ router.post("/", async (req, res) => {
             if (client) {
               
               // ---------------------------------------------------------
-              // PART A: CRM UPDATE
+              // PART A: CRM UPDATE (With Priority Logic)
               // ---------------------------------------------------------
               
               let contact = await Contact.findOne({ phoneNumber: from, ownerId: client._id });
@@ -67,15 +67,30 @@ router.post("/", async (req, res) => {
                   phoneNumber: from,
                   ownerId: client._id,
                   name: `Guest ${from.slice(-4)}`,
-                  status: "New",
-                  priority: "Low" // Default Priority
+                  callStatus: "Pending",
+                  priority: "Low",
+                  messageCount: 0 // Will increment below
                 });
               }
 
-              // Update Basic Info
+              // Count messages from this customer to calculate priority
+              const currentMsgCount = (contact.messageCount || 0) + 1;
+              let newPriority = "Low";
+
+              if (currentMsgCount >= 2 && currentMsgCount < 4) newPriority = "Medium";
+              if (currentMsgCount >= 4) newPriority = "High"; // 4+ Messages = High Priority
+
+              // Update Contact Info
               contact.lastMessage = msgBody;
               contact.lastMessageTime = new Date();
-              contact.messageCount = (contact.messageCount || 0) + 1;
+              contact.messageCount = currentMsgCount;
+              contact.priority = newPriority;
+              
+              // Agent Notified Logic (If assigned, mark as Pending to alert agent)
+              if (contact.assignedTo) {
+                  contact.callStatus = "Pending"; 
+              }
+
               await contact.save();
 
               // Save Message
@@ -87,31 +102,14 @@ router.post("/", async (req, res) => {
                 type: msgObj.type
               });
 
-              // 🔥🔥🔥 NEW: AUTO PRIORITY LOGIC 🔥🔥🔥
-              // Customer එවපු මැසේජ් ගණන බලනවා
-              const msgCount = await Message.countDocuments({ contactId: contact._id, sender: "customer" });
-              
-              let newPriority = "Low";
-              if (msgCount === 2) newPriority = "Mid";
-              if (msgCount >= 3) newPriority = "High"; // මැසේජ් 3ක් හෝ ඊට වැඩි නම් High
-
-              contact.priority = newPriority;
-              
-              // Agent කෙනෙක්ට Assign කරලා නම් තියෙන්නේ, එයාට Notification එකක් වගේ Status එක Pending කරනවා
-              if (contact.assignedTo) {
-                  contact.status = "Pending"; 
-              }
-              await contact.save();
-              // 🔥🔥🔥 END PRIORITY LOGIC 🔥🔥🔥
-
 
               // ---------------------------------------------------------
-              // PART B: BOT LOGIC
+              // PART B: BOT LOGIC (Unchanged)
               // ---------------------------------------------------------
 
               const botConfig = await BotConfig.findOne({ ownerId: client._id });
 
-              if (botConfig && botConfig.isActive && botConfig.replies.length > 0) {
+              if (botConfig && botConfig.replies && botConfig.replies.length > 0) {
                 
                 let session = await ChatSession.findOne({ userId: client._id, phoneNumber: from });
 
@@ -157,7 +155,7 @@ router.post("/", async (req, res) => {
 });
 
 // ==========================================
-// HELPER: Send Message
+// HELPER: Send Message (Unchanged)
 // ==========================================
 const sendWhatsAppMessage = async (client, to, replyStep) => {
   try {

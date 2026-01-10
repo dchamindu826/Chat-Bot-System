@@ -13,12 +13,12 @@ const ContactSchema = new mongoose.Schema({
     default: 'Pending' 
   },
 
-  // Auto Priority Logic සඳහා
-  messageCount: { type: Number, default: 1 }, // මැසේජ් කීයක් එව්වද?
+  // 🔥 Priority Auto-Logic
+  messageCount: { type: Number, default: 1 }, 
   priority: { 
     type: String, 
     enum: ['High', 'Medium', 'Low'], 
-    default: 'Low' // 1 Message = Low, >1 = High (Logic එක Webhook එකේ ලියන්න ඕන)
+    default: 'Low' 
   },
 
   lastMessage: { type: String },
