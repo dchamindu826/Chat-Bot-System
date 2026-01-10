@@ -31,7 +31,9 @@ router.get("/", (req, res) => {
 // 2. MESSAGE HANDLING ROUTE
 // ==========================================
 router.post("/", async (req, res) => {
+  // 🔥 DEBUG LOG: Capture OTP or Any Message
   console.log("📩 INCOMING DATA:", JSON.stringify(req.body, null, 2));
+  
   const body = req.body;
 
   try {
@@ -70,16 +72,16 @@ router.post("/", async (req, res) => {
                   name: `Guest ${from.slice(-4)}`,
                   callStatus: "Pending",
                   priority: "Low",
-                  messageCount: 0 // Will increment below
+                  messageCount: 0 
                 });
               }
 
-              // Count messages from this customer to calculate priority
+              // Priority Logic
               const currentMsgCount = (contact.messageCount || 0) + 1;
               let newPriority = "Low";
 
               if (currentMsgCount >= 2 && currentMsgCount < 4) newPriority = "Medium";
-              if (currentMsgCount >= 4) newPriority = "High"; // 4+ Messages = High Priority
+              if (currentMsgCount >= 4) newPriority = "High"; 
 
               // Update Contact Info
               contact.lastMessage = msgBody;
@@ -87,7 +89,6 @@ router.post("/", async (req, res) => {
               contact.messageCount = currentMsgCount;
               contact.priority = newPriority;
               
-              // Agent Notified Logic (If assigned, mark as Pending to alert agent)
               if (contact.assignedTo) {
                   contact.callStatus = "Pending"; 
               }
@@ -105,7 +106,7 @@ router.post("/", async (req, res) => {
 
 
               // ---------------------------------------------------------
-              // PART B: BOT LOGIC (Unchanged)
+              // PART B: BOT LOGIC
               // ---------------------------------------------------------
 
               const botConfig = await BotConfig.findOne({ ownerId: client._id });
@@ -120,6 +121,7 @@ router.post("/", async (req, res) => {
 
                 let currentStepIndex = session.currentStep;
 
+                // Loop back to 0 if steps finished (Optional: Remove if you want to stop)
                 if (currentStepIndex >= botConfig.replies.length) {
                     currentStepIndex = 0; 
                     session.currentStep = 0;
@@ -156,7 +158,7 @@ router.post("/", async (req, res) => {
 });
 
 // ==========================================
-// HELPER: Send Message (Unchanged)
+// HELPER: Send Message
 // ==========================================
 const sendWhatsAppMessage = async (client, to, replyStep) => {
   try {
