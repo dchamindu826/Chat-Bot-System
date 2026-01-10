@@ -1,6 +1,7 @@
 // routes/team.js
 const router = require("express").Router();
 const User = require("../models/User");
+const Contact = require("../models/Contact"); // <--- MEKA ADD KALA
 const CryptoJS = require("crypto-js");
 const { verifyToken } = require("../verifyToken");
 
@@ -19,7 +20,7 @@ router.post("/add-agent", verifyToken, async (req, res) => {
       email: req.body.email,
       password: CryptoJS.AES.encrypt(req.body.password, process.env.PASS_SEC).toString(),
       role: "agent",
-      ownerId: req.user.id, // Log wela inna Owner ge ID eka
+      ownerId: req.user.id,
       businessName: req.user.businessName || "Agent"
     });
 
@@ -40,10 +41,9 @@ router.get("/agents", verifyToken, async (req, res) => {
   }
 });
 
-// 3. UPDATE AGENT (EDIT) - New Route
+// 3. UPDATE AGENT
 router.put("/agent/:id", verifyToken, async (req, res) => {
   try {
-    // Password eka wenas karanawa nam encrypt karanna ona
     if (req.body.password) {
       req.body.password = CryptoJS.AES.encrypt(
         req.body.password,
@@ -53,9 +53,7 @@ router.put("/agent/:id", verifyToken, async (req, res) => {
 
     const updatedAgent = await User.findByIdAndUpdate(
       req.params.id,
-      {
-        $set: req.body,
-      },
+      { $set: req.body },
       { new: true }
     );
     res.status(200).json(updatedAgent);
@@ -64,7 +62,7 @@ router.put("/agent/:id", verifyToken, async (req, res) => {
   }
 });
 
-// 4. DELETE AGENT - New Route
+// 4. DELETE AGENT
 router.delete("/agent/:id", verifyToken, async (req, res) => {
   try {
     await User.findByIdAndDelete(req.params.id);
@@ -73,5 +71,26 @@ router.delete("/agent/:id", verifyToken, async (req, res) => {
     res.status(500).json(err);
   }
 });
+
+// 5. ASSIGN CHATS (BULK) - <--- MEKA THAMA MISSING ROUTE EKA
+router.put("/assign-chats", verifyToken, async (req, res) => {
+    try {
+      const { contactIds, agentId } = req.body;
+  
+      if (!contactIds || !agentId) {
+        return res.status(400).json({ message: "Contacts and Agent ID required" });
+      }
+  
+      // Update assignedTo field for selected contacts
+      await Contact.updateMany(
+        { _id: { $in: contactIds } },
+        { $set: { assignedTo: agentId } }
+      );
+  
+      res.status(200).json({ message: "Contacts assigned successfully!" });
+    } catch (err) {
+      res.status(500).json(err);
+    }
+  });
 
 module.exports = router;
