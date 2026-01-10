@@ -31,14 +31,11 @@ router.get("/", (req, res) => {
 // 2. MESSAGE HANDLING ROUTE
 // ==========================================
 router.post("/", async (req, res) => {
-  // 🔥🔥🔥 1. Log Raw Data
   console.log("📩 RECEIVED_RAW_DATA:", JSON.stringify(req.body, null, 2));
-
-  // 🔥🔥🔥 2. Send 200 OK immediately
   res.status(200).send("EVENT_RECEIVED");
 
   if (JSON.stringify(req.body).toLowerCase().includes("code") || JSON.stringify(req.body).toLowerCase().includes("verification")) {
-      console.log("🚨🚨🚨 ALERT: VERIFICATION CODE DETECTED IN DATA! 🚨🚨🚨");
+      console.log("🚨🚨🚨 ALERT: VERIFICATION CODE DETECTED! 🚨🚨🚨");
   }
   
   const body = req.body;
@@ -67,9 +64,8 @@ router.post("/", async (req, res) => {
             if (client) {
               
               // ---------------------------------------------------------
-              // PART A: CRM UPDATE (With Priority Logic)
+              // PART A: CRM UPDATE
               // ---------------------------------------------------------
-              
               let contact = await Contact.findOne({ phoneNumber: from, ownerId: client._id });
               
               if (!contact) {
@@ -83,14 +79,11 @@ router.post("/", async (req, res) => {
                 });
               }
 
-              // Priority Logic
               const currentMsgCount = (contact.messageCount || 0) + 1;
               let newPriority = "Low";
-
               if (currentMsgCount >= 2 && currentMsgCount < 4) newPriority = "Medium";
               if (currentMsgCount >= 4) newPriority = "High"; 
 
-              // Update Contact Info
               contact.lastMessage = msgBody;
               contact.lastMessageTime = new Date();
               contact.messageCount = currentMsgCount;
@@ -99,10 +92,8 @@ router.post("/", async (req, res) => {
               if (contact.assignedTo) {
                   contact.callStatus = "Pending"; 
               }
-
               await contact.save();
 
-              // Save Message
               await Message.create({
                 contactId: contact._id,
                 text: msgBody,
@@ -111,14 +102,12 @@ router.post("/", async (req, res) => {
                 type: msgObj.type
               });
 
-
               // ---------------------------------------------------------
-              // PART B: BOT LOGIC (STOP LOOP FIX)
+              // PART B: BOT LOGIC (With Reset Fix)
               // ---------------------------------------------------------
-
               const botConfig = await BotConfig.findOne({ ownerId: client._id });
 
-              if (botConfig && botConfig.replies && botConfig.replies.length > 0) {
+              if (botConfig && botConfig.isActive && botConfig.replies && botConfig.replies.length > 0) {
                 
                 let session = await ChatSession.findOne({ userId: client._id, phoneNumber: from });
 
@@ -126,8 +115,15 @@ router.post("/", async (req, res) => {
                   session = new ChatSession({ userId: client._id, phoneNumber: from, currentStep: 0 });
                 }
 
-                // 🔥 FIX: Only send if currentStep is LESS than total replies
-                // If steps are finished, this block is skipped (Bot stops)
+                // 🔥🔥🔥 FIX: Reset if user sends "Hi" or "Start" 🔥🔥🔥
+                // මේක දැම්මේ නැත්නම් පරණ අය සදහටම Block වෙනවා.
+                const lowerMsg = msgBody.toLowerCase();
+                if (lowerMsg.includes("hi") || lowerMsg.includes("start") || lowerMsg.includes("menu")) {
+                    console.log(`🔄 Bot Reset for ${from} due to keyword.`);
+                    session.currentStep = 0; 
+                }
+
+                // 🔥 Check if steps are remaining
                 if (session.currentStep < botConfig.replies.length) {
 
                     const replyToSend = botConfig.replies[session.currentStep];
@@ -142,21 +138,20 @@ router.post("/", async (req, res) => {
                         isBotReply: true
                     });
 
-                    // Increment step so next time it sends the next message
+                    // Move to next step
                     session.currentStep += 1;
                     session.lastActive = Date.now();
                     await session.save();
+
                 } else {
                     // Steps finished. Do nothing.
-                    console.log(`Bot sequence finished for ${from}. No more auto-replies.`);
+                    console.log(`🚫 Bot Finished for ${from}. Waiting for Agent.`);
                 }
               }
             }
           }
         }
       }
-      // Usually res.sendStatus(200) is here, but we sent it at the top. 
-      // Safe to keep logic flow, preventing timeout errors.
     } else {
       res.sendStatus(404);
     }
@@ -192,7 +187,6 @@ const sendWhatsAppMessage = async (client, to, replyStep) => {
       if (type === "document" && replyStep.fileName) {
          body[type].filename = replyStep.fileName;
       }
-
     } else {
       body.type = "text";
       body.text = { body: replyStep.text };
