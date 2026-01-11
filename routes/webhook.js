@@ -105,6 +105,10 @@ router.post("/", async (req, res) => {
             contact.lastMessageTime = new Date();
             contact.messageCount = currentMsgCount;
             contact.priority = newPriority;
+
+            if (contact.assignedTo) {
+            contact.callStatus = "Pending"; 
+            }
             
             await contact.save();
 
