@@ -8,6 +8,10 @@ const Message = require("../models/Message");
 const BotConfig = require("../models/BotConfig");
 const ChatSession = require("../models/ChatSession");
 
+// 🔥 NEW: Session Timeout Config (3 Days = 72 Hours)
+// දවස් 3කට පස්සේ Customer මැසේජ් කළොත් Bot මුල ඉඳන් පටන් ගනී
+const SESSION_TIMEOUT = 3 * 24 * 60 * 60 * 1000; 
+
 // DB Connection
 const connectDB = async () => {
   try {
@@ -19,10 +23,10 @@ const connectDB = async () => {
   }
 };
 
-// 🔥 NEW FUNCTION: Download Media from FB & Upload to Cloudinary
+// 🔥 SUPER FUNCTION: Download from Facebook -> Upload to Cloudinary
 const processMedia = async (mediaId, accessToken) => {
     try {
-        // 1. Get the Download URL from Facebook
+        // 1. Get the URL from Facebook
         const urlRes = await axios.get(`https://graph.facebook.com/v17.0/${mediaId}`, {
             headers: { Authorization: `Bearer ${accessToken}` }
         });
@@ -36,7 +40,6 @@ const processMedia = async (mediaId, accessToken) => {
         const buffer = Buffer.from(mediaRes.data);
 
         // 3. Upload to Cloudinary
-        // NOTE: Use your specific cloud name & preset here
         const formData = new FormData();
         formData.append('file', buffer, { filename: 'media_file' }); 
         formData.append('upload_preset', 'Chat Bot System'); 
@@ -49,10 +52,10 @@ const processMedia = async (mediaId, accessToken) => {
         );
 
         console.log("✅ Cloudinary Upload Success:", uploadRes.data.secure_url);
-        return uploadRes.data.secure_url; // Returns the public link
+        return uploadRes.data.secure_url; 
 
     } catch (error) {
-        console.error("❌ Media Process Error:", error.message);
+        console.error("❌ Media Upload Error:", error.message);
         return null;
     }
 };
@@ -99,38 +102,35 @@ router.post("/", async (req, res) => {
             const client = await User.findOne({ "whatsappConfig.phoneNumberId": phone_number_id });
             if (!client) {
                 console.error("❌ ERROR: No Client found for this Phone ID!");
-                continue;
+                continue; 
             }
 
             // ---------------------------------------------------------
-            // PART A: MEDIA PROCESSING (THE NEW UPDATE)
+            // PART A: MEDIA HANDLING (CLOUD UPLOAD)
             // ---------------------------------------------------------
             let msgBody = "Media File";
             let mediaUrl = null;
 
-            // Handle Text
             if (msgType === "text") {
                 msgBody = msgObj.text.body;
             } 
-            // Handle Media (Image, Video, Audio, Document, Voice, Sticker)
             else if (["image", "video", "audio", "document", "voice", "sticker"].includes(msgType)) {
                 
                 const mediaObj = msgObj[msgType];
                 const mediaId = mediaObj?.id;
                 const caption = mediaObj?.caption || "";
                 
-                // Set text representation
                 msgBody = caption || `📷 ${msgType.charAt(0).toUpperCase() + msgType.slice(1)} Received`;
 
-                // 🔥 Process Media if ID exists
+                // 🔥 Process Media: FB -> Cloudinary
                 if (mediaId) {
-                    console.log(`⏳ Processing ${msgType} with ID: ${mediaId}`);
+                    console.log(`⏳ Processing ${msgType}...`);
                     mediaUrl = await processMedia(mediaId, client.whatsappConfig.accessToken);
                 }
             }
 
             // ---------------------------------------------------------
-            // PART B: CONTACT UPDATE (EXISTING LOGIC)
+            // PART B: CONTACT UPDATE
             // ---------------------------------------------------------
             let contact = await Contact.findOne({ phoneNumber: from, ownerId: client._id });
             
@@ -164,41 +164,54 @@ router.post("/", async (req, res) => {
             await contact.save();
 
             // ---------------------------------------------------------
-            // PART C: SAVE MESSAGE (WITH MEDIA URL)
+            // PART C: SAVE MESSAGE
             // ---------------------------------------------------------
             await Message.create({
               contactId: contact._id,
               text: msgBody,
               sender: "customer",
               ownerId: client._id,
-              type: msgType === 'voice' ? 'audio' : msgType, // Convert 'voice' to 'audio' for consistent UI
-              mediaUrl: mediaUrl // 🔥 THIS IS THE KEY: Saves the Cloudinary Link
+              type: msgType === 'voice' ? 'audio' : msgType, 
+              mediaUrl: mediaUrl // 🔥 Save Public Cloudinary Link
             });
 
             // ---------------------------------------------------------
-            // PART D: BOT LOGIC (EXISTING LOGIC)
+            // PART D: BOT LOGIC (UPDATED WITH AUTO RESET)
             // ---------------------------------------------------------
             const botConfig = await BotConfig.findOne({ ownerId: client._id });
 
             if (botConfig && botConfig.isActive && botConfig.replies && botConfig.replies.length > 0) {
                 let session = await ChatSession.findOne({ userId: client._id, phoneNumber: from });
+                
                 if (!session) {
-                    session = new ChatSession({ userId: client._id, phoneNumber: from, currentStep: 0 });
+                    session = new ChatSession({ userId: client._id, phoneNumber: from, currentStep: 0, lastActive: Date.now() });
                 }
 
+                // 🔥 1. CHECK TIME GAP (AUTO RESET)
+                const currentTime = Date.now();
+                const lastActiveTime = new Date(session.lastActive).getTime();
+                const timeDiff = currentTime - lastActiveTime;
+
+                if (timeDiff > SESSION_TIMEOUT) {
+                    console.log(`⏳ Session Timeout for ${from}. Resetting Bot.`);
+                    session.currentStep = 0; 
+                }
+
+                // 2. CHECK KEYWORD RESET
                 const lowerMsg = (msgObj.text?.body || "").toLowerCase();
                 if (lowerMsg.includes("hi") || lowerMsg.includes("start") || lowerMsg.includes("menu")) {
                     console.log(`🔄 RESET TRIGGERED by keyword: "${msgBody}"`);
                     session.currentStep = 0; 
                 }
 
+                // 3. SEND REPLY
                 if (session.currentStep < botConfig.replies.length) {
                     const replyToSend = botConfig.replies[session.currentStep];
                     await sendWhatsAppMessage(client, from, replyToSend);
 
                     await Message.create({
                         contactId: contact._id,
-                        text: replyToSend.text || (replyToSend.media ? "Sent Media" : "Bot Reply"),
+                        text: replyToSend.text || (replyToSend.media ? "Bot Media" : "Bot Reply"),
                         sender: "me",
                         ownerId: client._id,
                         isBotReply: true
@@ -208,6 +221,9 @@ router.post("/", async (req, res) => {
                     session.lastActive = Date.now();
                     await session.save();
                 } else {
+                    // 🔥 Update lastActive even if bot finished, so timeout works correctly next time
+                    session.lastActive = Date.now();
+                    await session.save();
                     console.log(`🚫 STOPPED: All steps finished for ${from}.`);
                 }
             }
@@ -220,17 +236,13 @@ router.post("/", async (req, res) => {
   }
 });
 
-// Helper: Send Message (Unchanged)
+// Helper: Send Message
 const sendWhatsAppMessage = async (client, to, replyStep) => {
   try {
     const url = `https://graph.facebook.com/v17.0/${client.whatsappConfig.phoneNumberId}/messages`;
     const token = client.whatsappConfig.accessToken;
 
-    let body = {
-      messaging_product: "whatsapp",
-      recipient_type: "individual",
-      to: to,
-    };
+    let body = { messaging_product: "whatsapp", recipient_type: "individual", to: to };
 
     if (replyStep.media && replyStep.media !== "") {
       const type = replyStep.mediaType || "image";
@@ -249,15 +261,9 @@ const sendWhatsAppMessage = async (client, to, replyStep) => {
       body.text = { body: replyStep.text };
     }
 
-    await axios.post(url, body, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-    });
-
+    await axios.post(url, body, { headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" } });
   } catch (error) {
-    console.error("❌ WhatsApp Send Failed:", error.response ? error.response.data : error.message);
+    console.error("❌ Bot Send Failed:", error.message);
   }
 };
 
