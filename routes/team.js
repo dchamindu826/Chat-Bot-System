@@ -30,22 +30,35 @@ router.post("/add-agent", verifyToken, async (req, res) => {
   }
 });
 
-// 🔥 2. GET AGENTS (UPDATED WITH COUNT LOGIC)
+// 🔥 2. GET AGENTS LIST (WITH CORRECT COUNTS)
+// මේකෙන් තමයි කාඩ් වල එළියේ තියෙන 172, 435 වගේ ඉලක්කම් හරියට පෙන්නන්නේ
 router.get("/agents", verifyToken, async (req, res) => {
   try {
     const agents = await User.find({ ownerId: req.user.id });
 
     // හැම Agent ටම අදාලව Assign වෙලා තියෙන Contacts ගණන හොයමු
     const agentsWithCounts = await Promise.all(agents.map(async (agent) => {
-        const count = await Contact.countDocuments({ 
+        
+        // 1. Total Assigned (Lead Count)
+        const totalAssigned = await Contact.countDocuments({ 
             ownerId: req.user.id, 
-            assignedTo: agent._id  // Agent ID එකට මැච් වෙන ඒවා විතරක් ගණන් කරන්න
+            assignedTo: agent._id 
+        });
+
+        // 2. Covered Count (Answered, Reject, Busy, etc.)
+        // Pending ඇරෙන්න අනිත් ඔක්කොම Covered කියලා ගමු
+        const coveredCount = await Contact.countDocuments({
+            ownerId: req.user.id,
+            assignedTo: agent._id,
+            callStatus: { $ne: 'Pending' } // Not Equal to Pending
         });
         
-        // Agent Object එකට 'leadCount' කියන අලුත් කෑල්ල එකතු කරලා යවනවා
+        // Data Return කරනවා
         return { 
             ...agent._doc, 
-            leadCount: count 
+            leadCount: totalAssigned,
+            coveredCount: coveredCount,
+            successRate: totalAssigned > 0 ? ((coveredCount / totalAssigned) * 100).toFixed(1) : 0
         };
     }));
 
@@ -56,7 +69,36 @@ router.get("/agents", verifyToken, async (req, res) => {
   }
 });
 
-// 3. UPDATE AGENT (Unchanged)
+// 🔥🔥🔥 3. GET SPECIFIC AGENT PERFORMANCE (NEW ROUTE) 🔥🔥🔥
+// ඔයා අර Modal එක Open කළාම මේ Route එක Call කරන්න ඕන
+router.get("/agent-performance/:id", verifyToken, async (req, res) => {
+    try {
+        const agentId = req.params.id;
+
+        // 1. Stats ගණන් කරමු
+        const totalAssigned = await Contact.countDocuments({ assignedTo: agentId });
+        const covered = await Contact.countDocuments({ assignedTo: agentId, callStatus: { $ne: 'Pending' } });
+        const answered = await Contact.countDocuments({ assignedTo: agentId, callStatus: 'Answered' });
+
+        // 2. Recent Activity (Contacts List)
+        // අදාල Agent ගේ විතරක් Contacts අන්තිමට Update වුන පිළිවෙලට
+        const recentActivity = await Contact.find({ assignedTo: agentId })
+            .sort({ updatedAt: -1 }) // අලුත්ම ඒවා උඩට
+            .limit(20); // අන්තිම 20 විතරක් යවමු (Load නොවෙන්න)
+
+        res.status(200).json({
+            totalAssigned,
+            covered,
+            successRate: totalAssigned > 0 ? ((answered / totalAssigned) * 100).toFixed(1) : 0,
+            recentActivity
+        });
+
+    } catch (err) {
+        res.status(500).json(err);
+    }
+});
+
+// 4. UPDATE AGENT
 router.put("/agent/:id", verifyToken, async (req, res) => {
   try {
     if (req.body.password) {
@@ -76,17 +118,20 @@ router.put("/agent/:id", verifyToken, async (req, res) => {
   }
 });
 
-// 4. DELETE AGENT (Unchanged)
+// 5. DELETE AGENT
 router.delete("/agent/:id", verifyToken, async (req, res) => {
   try {
     await User.findByIdAndDelete(req.params.id);
+    // Optional: Unassign contacts from deleted agent
+    await Contact.updateMany({ assignedTo: req.params.id }, { $set: { assignedTo: null } });
+    
     res.status(200).json("Agent has been deleted...");
   } catch (err) {
     res.status(500).json(err);
   }
 });
 
-// 5. ASSIGN CHATS
+// 6. ASSIGN CHATS
 router.put("/assign-chats", verifyToken, async (req, res) => {
     try {
       const { contactIds, agentId } = req.body;
@@ -103,8 +148,7 @@ router.put("/assign-chats", verifyToken, async (req, res) => {
     }
 });
 
-// 🔥🔥🔥 6. RESET ROUTE (TEMPORARY FIX)
-// මේක එක පාරක් රන් කරලා ඔක්කොම Unassign කරන්න පුළුවන්
+// 7. RESET ASSIGNMENTS
 router.put("/reset-assignments", verifyToken, async (req, res) => {
     try {
         await Contact.updateMany(
