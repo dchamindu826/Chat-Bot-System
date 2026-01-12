@@ -1,7 +1,7 @@
 const router = require("express").Router();
 const axios = require("axios");
 const mongoose = require("mongoose");
-const FormData = require("form-data"); // 🔥 MEKA ONAMA KRNWA
+const FormData = require("form-data"); // 🔥 REQUIRED FOR CLOUDINARY UPLOAD
 const User = require("../models/User");
 const Contact = require("../models/Contact");
 const Message = require("../models/Message");
@@ -19,10 +19,10 @@ const connectDB = async () => {
   }
 };
 
-// 🔥 SUPER FUNCTION: Download from Facebook -> Upload to Cloudinary
+// 🔥 NEW FUNCTION: Download Media from FB & Upload to Cloudinary
 const processMedia = async (mediaId, accessToken) => {
     try {
-        // 1. Get the URL from Facebook
+        // 1. Get the Download URL from Facebook
         const urlRes = await axios.get(`https://graph.facebook.com/v17.0/${mediaId}`, {
             headers: { Authorization: `Bearer ${accessToken}` }
         });
@@ -35,11 +35,12 @@ const processMedia = async (mediaId, accessToken) => {
         });
         const buffer = Buffer.from(mediaRes.data);
 
-        // 3. Upload to Cloudinary (Using your credentials)
+        // 3. Upload to Cloudinary
+        // NOTE: Use your specific cloud name & preset here
         const formData = new FormData();
         formData.append('file', buffer, { filename: 'media_file' }); 
-        formData.append('upload_preset', 'Chat Bot System'); // Frontend eke thibba preset eka
-        formData.append('cloud_name', 'dyixoaldi'); // Frontend eke thibba cloud name eka
+        formData.append('upload_preset', 'Chat Bot System'); 
+        formData.append('cloud_name', 'dyixoaldi'); 
 
         const uploadRes = await axios.post(
             `https://api.cloudinary.com/v1_1/dyixoaldi/auto/upload`, 
@@ -47,15 +48,16 @@ const processMedia = async (mediaId, accessToken) => {
             { headers: { ...formData.getHeaders() } }
         );
 
-        return uploadRes.data.secure_url; // Public Link eka denawa
+        console.log("✅ Cloudinary Upload Success:", uploadRes.data.secure_url);
+        return uploadRes.data.secure_url; // Returns the public link
 
     } catch (error) {
-        console.error("❌ Media Upload Error:", error.message);
+        console.error("❌ Media Process Error:", error.message);
         return null;
     }
 };
 
-// 1. VERIFICATION
+// 1. VERIFICATION ROUTE
 router.get("/", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
@@ -74,7 +76,7 @@ router.get("/", (req, res) => {
   }
 });
 
-// 2. MESSAGE HANDLING
+// 2. MESSAGE HANDLING ROUTE
 router.post("/", async (req, res) => {
   res.status(200).send("EVENT_RECEIVED");
 
@@ -95,35 +97,40 @@ router.post("/", async (req, res) => {
 
             // 1. Client Find
             const client = await User.findOne({ "whatsappConfig.phoneNumberId": phone_number_id });
-            if (!client) continue;
+            if (!client) {
+                console.error("❌ ERROR: No Client found for this Phone ID!");
+                continue;
+            }
 
             // ---------------------------------------------------------
-            // PART A: MEDIA HANDLING (CLOUD UPLOAD)
+            // PART A: MEDIA PROCESSING (THE NEW UPDATE)
             // ---------------------------------------------------------
             let msgBody = "Media File";
             let mediaUrl = null;
 
+            // Handle Text
             if (msgType === "text") {
                 msgBody = msgObj.text.body;
             } 
+            // Handle Media (Image, Video, Audio, Document, Voice, Sticker)
             else if (["image", "video", "audio", "document", "voice", "sticker"].includes(msgType)) {
                 
                 const mediaObj = msgObj[msgType];
                 const mediaId = mediaObj?.id;
                 const caption = mediaObj?.caption || "";
                 
+                // Set text representation
                 msgBody = caption || `📷 ${msgType.charAt(0).toUpperCase() + msgType.slice(1)} Received`;
 
-                // 🔥 Process Media: FB -> Cloudinary
+                // 🔥 Process Media if ID exists
                 if (mediaId) {
-                    console.log("⏳ Processing Media...");
+                    console.log(`⏳ Processing ${msgType} with ID: ${mediaId}`);
                     mediaUrl = await processMedia(mediaId, client.whatsappConfig.accessToken);
-                    console.log("✅ Media Uploaded:", mediaUrl);
                 }
             }
 
             // ---------------------------------------------------------
-            // PART B: CONTACT UPDATE
+            // PART B: CONTACT UPDATE (EXISTING LOGIC)
             // ---------------------------------------------------------
             let contact = await Contact.findOne({ phoneNumber: from, ownerId: client._id });
             
@@ -157,19 +164,19 @@ router.post("/", async (req, res) => {
             await contact.save();
 
             // ---------------------------------------------------------
-            // PART C: SAVE MESSAGE
+            // PART C: SAVE MESSAGE (WITH MEDIA URL)
             // ---------------------------------------------------------
             await Message.create({
               contactId: contact._id,
               text: msgBody,
               sender: "customer",
               ownerId: client._id,
-              type: msgType === 'voice' ? 'audio' : msgType, 
-              mediaUrl: mediaUrl // 🔥 Save Public Cloudinary Link
+              type: msgType === 'voice' ? 'audio' : msgType, // Convert 'voice' to 'audio' for consistent UI
+              mediaUrl: mediaUrl // 🔥 THIS IS THE KEY: Saves the Cloudinary Link
             });
 
             // ---------------------------------------------------------
-            // PART D: BOT LOGIC
+            // PART D: BOT LOGIC (EXISTING LOGIC)
             // ---------------------------------------------------------
             const botConfig = await BotConfig.findOne({ ownerId: client._id });
 
@@ -180,7 +187,8 @@ router.post("/", async (req, res) => {
                 }
 
                 const lowerMsg = (msgObj.text?.body || "").toLowerCase();
-                if (lowerMsg.includes("hi") || lowerMsg.includes("start")) {
+                if (lowerMsg.includes("hi") || lowerMsg.includes("start") || lowerMsg.includes("menu")) {
+                    console.log(`🔄 RESET TRIGGERED by keyword: "${msgBody}"`);
                     session.currentStep = 0; 
                 }
 
@@ -190,7 +198,7 @@ router.post("/", async (req, res) => {
 
                     await Message.create({
                         contactId: contact._id,
-                        text: replyToSend.text || "Bot Reply",
+                        text: replyToSend.text || (replyToSend.media ? "Sent Media" : "Bot Reply"),
                         sender: "me",
                         ownerId: client._id,
                         isBotReply: true
@@ -199,6 +207,8 @@ router.post("/", async (req, res) => {
                     session.currentStep += 1;
                     session.lastActive = Date.now();
                     await session.save();
+                } else {
+                    console.log(`🚫 STOPPED: All steps finished for ${from}.`);
                 }
             }
           }
@@ -210,26 +220,44 @@ router.post("/", async (req, res) => {
   }
 });
 
-// Helper: Send Message
+// Helper: Send Message (Unchanged)
 const sendWhatsAppMessage = async (client, to, replyStep) => {
   try {
     const url = `https://graph.facebook.com/v17.0/${client.whatsappConfig.phoneNumberId}/messages`;
     const token = client.whatsappConfig.accessToken;
 
-    let body = { messaging_product: "whatsapp", recipient_type: "individual", to: to };
+    let body = {
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: to,
+    };
 
-    if (replyStep.media) {
+    if (replyStep.media && replyStep.media !== "") {
       const type = replyStep.mediaType || "image";
       body.type = type;
-      body[type] = { link: replyStep.media, caption: replyStep.text || "" };
+      
+      body[type] = {
+        link: replyStep.media,
+        caption: replyStep.text || ""
+      };
+
+      if (type === "document" && replyStep.fileName) {
+         body[type].filename = replyStep.fileName;
+      }
     } else {
       body.type = "text";
       body.text = { body: replyStep.text };
     }
 
-    await axios.post(url, body, { headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" } });
+    await axios.post(url, body, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+    });
+
   } catch (error) {
-    console.error("❌ Bot Send Failed:", error.message);
+    console.error("❌ WhatsApp Send Failed:", error.response ? error.response.data : error.message);
   }
 };
 
