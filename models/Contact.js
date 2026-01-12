@@ -13,10 +13,12 @@ const ContactSchema = new mongoose.Schema({
     default: 'Pending' 
   },
   
-  // 🔥 NEW FIELDS: Attempt Data (මේවා තමයි අඩු වෙලා තිබ්බේ)
-  attemptMethod: { type: String, default: "" }, // 3CX, Direct, WhatsApp
-  attemptCount: { type: String, default: "0" }, // 0, 1, 2, 5+ (String දැම්මේ "5+" නිසා)
-  
+  // 🔥 NEW: Unread Messages Count (UI එකේ රතු පාටින් පෙන්වන්න)
+  unreadCount: { type: Number, default: 0 }, 
+
+  // Campaign Data
+  attemptMethod: { type: String, default: "" }, 
+  attemptCount: { type: String, default: "0" },
   remarks: { type: String, default: "" }, 
 
   // Priority Auto-Logic

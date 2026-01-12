@@ -6,13 +6,17 @@ const Message = require("../models/Message");
 const Contact = require("../models/Contact");
 
 // ---------------------------------------------------------
-// 1. GET MESSAGES (Same as before)
+// 1. GET MESSAGES (Chat Open කරන විට)
 // ---------------------------------------------------------
 router.get("/:contactId", verifyToken, async (req, res) => {
   try {
+    // 🔥 FIX: Chat එක Open කළාම Unread Count එක 0 කරන්න
+    await Contact.findByIdAndUpdate(req.params.contactId, { unreadCount: 0 });
+
     const messages = await Message.find({ 
       contactId: req.params.contactId 
     }).sort({ createdAt: 1 }); 
+    
     res.status(200).json(messages);
   } catch (err) {
     console.error("Get Messages Error:", err);
@@ -21,35 +25,23 @@ router.get("/:contactId", verifyToken, async (req, res) => {
 });
 
 // ---------------------------------------------------------
-// 2. SEND MESSAGE (🔥 FIXED LOGIC FOR AGENTS)
+// 2. SEND MESSAGE (Agent යවන මැසේජ්)
 // ---------------------------------------------------------
 router.post("/send", verifyToken, async (req, res) => {
   const { contactId, to, text, type, mediaUrl } = req.body; 
 
   try {
-    // 1️⃣ ISSARALA CONTACT HOYAMU (Mokada a contact aithi Client ta)
     const contact = await Contact.findById(contactId);
-    if (!contact) {
-        return res.status(404).json({ message: "Contact not found" });
-    }
+    if (!contact) return res.status(404).json({ message: "Contact not found" });
 
-    // 2️⃣ CONTACT GE OWNER (CLIENT) WA HOYAMU
-    // Agent log wela hitiyath, api config ganne me Owner gen.
     const client = await User.findById(contact.ownerId);
-    
-    if (!client || !client.whatsappConfig) {
-        return res.status(500).json({ message: "Client WhatsApp Config Not Found in DB" });
-    }
+    if (!client || !client.whatsappConfig) return res.status(500).json({ message: "Client Config Error" });
 
     const { phoneNumberId, accessToken } = client.whatsappConfig;
-
-    if (!phoneNumberId || !accessToken) {
-        return res.status(500).json({ message: "Invalid Client Credentials" });
-    }
+    if (!phoneNumberId || !accessToken) return res.status(500).json({ message: "Invalid Credentials" });
 
     const url = `https://graph.facebook.com/v17.0/${phoneNumberId}/messages`;
 
-    // 3️⃣ Message Body
     let body = {
       messaging_product: "whatsapp",
       recipient_type: "individual",
@@ -67,26 +59,22 @@ router.post("/send", verifyToken, async (req, res) => {
         body.text = { body: text };
     }
 
-    // 4️⃣ Send to Meta (Using Client's Token)
     await axios.post(url, body, {
       headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" }
     });
 
-    // 5️⃣ Save to DB
-    // sender: "me" kiyanne api yawapu message ekak nisa.
-    // ownerId: contact.ownerId (Client) wenna ona, ethakota Client ta meka eyage dashboard eke penawa.
     const newMessage = new Message({
         contactId,
         text: text || "Media File", 
         content: mediaUrl || text, 
         type: type || "text",
         sender: "me",
-        ownerId: contact.ownerId, // Save under the Client ID
-        direction: "outbound"
+        ownerId: contact.ownerId, 
+        direction: "outbound",
+        mediaUrl: mediaUrl // 🔥 Save URL so UI shows it
     });
     await newMessage.save();
 
-    // 6️⃣ Update Contact
     await Contact.findByIdAndUpdate(contactId, {
         lastMessage: text || (type === 'text' ? text : `Sent ${type}`),
         lastMessageTime: Date.now()
