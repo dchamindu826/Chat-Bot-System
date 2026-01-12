@@ -9,17 +9,11 @@ const ContactSchema = new mongoose.Schema({
   // Call Report Data
   callStatus: { 
     type: String, 
-    enum: ['Pending', 'Answered', 'No Answer', 'Reject', 'Busy', 'Callback', 'Wrong Number'], 
+    enum: ['Pending', 'Answered', 'No Answer', 'Reject', 'Call Later'], 
     default: 'Pending' 
   },
-  
-  // 🔥 NEW FIELDS: Attempt Data (මේවා තමයි අඩු වෙලා තිබ්බේ)
-  attemptMethod: { type: String, default: "" }, // 3CX, Direct, WhatsApp
-  attemptCount: { type: String, default: "0" }, // 0, 1, 2, 5+ (String දැම්මේ "5+" නිසා)
-  
-  remarks: { type: String, default: "" }, 
 
-  // Priority Auto-Logic
+  // 🔥 Priority Auto-Logic
   messageCount: { type: Number, default: 1 }, 
   priority: { 
     type: String, 
