@@ -13,8 +13,9 @@ const messagesRoute = require("./routes/messages");
 const analyticsRoute = require("./routes/analytics");
 const teamRoute = require('./routes/team');
 const crmRoute = require("./routes/crm");
-const broadcastRoute = require("./routes/broadcast"); // Broadcast route එකත් තිබුනා නම් මෙතනට දාන්න
-const templateRoute = require("./routes/templates"); // Templates route එකත් තිබුනා නම් මෙතනට දාන්න
+
+// 🔥 NOTE: Broadcast & Templates තාම හදලා නැති නිසා ඒවා මෙතනින් අයින් කළා.
+// නැත්නම් Server එක Crash වෙනවා.
 
 dotenv.config();
 
@@ -29,7 +30,7 @@ app.use(cors({
 
 app.use(express.json());
 
-// 🔥 VERCEL OPTIMIZED DB CONNECTION (Caching)
+// 🔥 VERCEL OPTIMIZED DB CONNECTION (Caching Fix)
 let isConnected = false; // Track connection status
 
 const connectDB = async () => {
@@ -49,7 +50,6 @@ const connectDB = async () => {
     console.log("New DB Connection Established ✅");
   } catch (err) {
     console.error("DB Connection Error: ❌", err);
-    // Don't exit process, allow retry
   }
 };
 
@@ -73,8 +73,6 @@ app.use("/api/messages", messagesRoute);
 app.use("/api/analytics", analyticsRoute);
 app.use("/api/team", teamRoute);
 app.use("/api/crm", crmRoute);
-// app.use("/api/broadcast", broadcastRoute); // Uncomment if using
-// app.use("/api/templates", templateRoute); // Uncomment if using
 
 // 404 handler
 app.use((req, res) => {
