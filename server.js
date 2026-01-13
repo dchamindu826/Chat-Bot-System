@@ -6,21 +6,22 @@ const dotenv = require('dotenv');
 // Routes Import
 const authRoute = require('./routes/auth');
 const userRoute = require('./routes/users');
-const botRoute = require('./routes/bot'); // ⚠️ Note: File එකේ නම 'bot.js' ම විය යුතුයි (routes folder එකේ)
+const botRoute = require('./routes/bot'); 
 const webhookRoute = require('./routes/webhook');
 const logsRoute = require("./routes/logs");
 const messagesRoute = require("./routes/messages");
 const analyticsRoute = require("./routes/analytics");
 const teamRoute = require('./routes/team');
 const crmRoute = require("./routes/crm");
+const broadcastRoute = require("./routes/broadcast"); // Broadcast route එකත් තිබුනා නම් මෙතනට දාන්න
+const templateRoute = require("./routes/templates"); // Templates route එකත් තිබුනා නම් මෙතනට දාන්න
 
 dotenv.config();
 
 const app = express();
 
-// CORS Settings - ඕනෑම තැනක ඉඳන් වැඩ කරන්න හදමු (Debugging ලේසි වෙන්න)
 app.use(cors({
-    origin: "*", // මෙය ආරක්ෂිත නැතත් දැනට Error එක හොයාගන්න ලේසියි
+    origin: "*", 
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     credentials: true,
     allowedHeaders: ["Content-Type", "token", "Authorization"]
@@ -28,30 +29,35 @@ app.use(cors({
 
 app.use(express.json());
 
-// ✅ OPTIMIZED DATABASE CONNECTION (Timeout Fix)
-const connectDB = async () => {
-  try {
-    // දැනටමත් connect වෙලා නම් ආයේ හදන්න එපා
-    if (mongoose.connection.readyState === 1) {
-        console.log("Using existing DB connection ✅");
-        return;
-    }
+// 🔥 VERCEL OPTIMIZED DB CONNECTION (Caching)
+let isConnected = false; // Track connection status
 
-    await mongoose.connect(process.env.MONGO_URL, {
-      // Timeout settings වැඩි කරමු (තත්පර 60ක් දක්වා)
-      serverSelectionTimeoutMS: 60000, 
-      socketTimeoutMS: 60000,
-      family: 4 // IPv4 Force කරන්න (Vercel IP අවුල් මගහරින්න)
+const connectDB = async () => {
+  if (isConnected) {
+    console.log("Using existing DB connection ✅");
+    return;
+  }
+
+  try {
+    const db = await mongoose.connect(process.env.MONGO_URL, {
+      serverSelectionTimeoutMS: 5000, // Timeout after 5s (Fail fast)
+      socketTimeoutMS: 45000,
+      family: 4 // IPv4 Force
     });
 
-    console.log("DB Connection Successful! ✅");
+    isConnected = db.connections[0].readyState;
+    console.log("New DB Connection Established ✅");
   } catch (err) {
     console.error("DB Connection Error: ❌", err);
+    // Don't exit process, allow retry
   }
 };
 
-// Server Run වෙද්දිම DB Connect කරන්න
-connectDB();
+// 🔥 MIDDLEWARE: Ensure DB is connected before handling ANY request
+app.use(async (req, res, next) => {
+    await connectDB();
+    next();
+});
 
 app.get("/", (req, res) => {
   res.send("SmartReply CRM Backend is Running! 🚀");
@@ -60,25 +66,28 @@ app.get("/", (req, res) => {
 // ✅ Routes Definitions
 app.use("/api/auth", authRoute);
 app.use("/api/users", userRoute);
-
-// 👇 මෙන්න මේක වෙනස් කළා. Frontend එක ඉල්ලන්නේ "/api/bot" නිසා.
 app.use("/api/bot-config", botRoute);
-
 app.use("/api/webhook", webhookRoute);
 app.use("/api/logs", logsRoute);
 app.use("/api/messages", messagesRoute);
 app.use("/api/analytics", analyticsRoute);
 app.use("/api/team", teamRoute);
 app.use("/api/crm", crmRoute);
+// app.use("/api/broadcast", broadcastRoute); // Uncomment if using
+// app.use("/api/templates", templateRoute); // Uncomment if using
 
 // 404 handler
 app.use((req, res) => {
     res.status(404).json({ message: "Route not found" });
 });
 
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`Backend server is running on port ${PORT}!`);
-});
+// For Local Development
+if (process.env.NODE_ENV !== 'production') {
+    const PORT = process.env.PORT || 5000;
+    app.listen(PORT, () => {
+      console.log(`Backend server is running on port ${PORT}!`);
+    });
+}
 
+// For Vercel
 module.exports = app;
