@@ -16,7 +16,7 @@ const crmRoute = require("./routes/crm");
 
 // 🔥 NEW IMPORTS
 const broadcastRoute = require("./routes/broadcast"); 
-const startScheduler = require("./cron/scheduler"); 
+app.use("/api/cron", cronRoute);
 
 dotenv.config();
 
