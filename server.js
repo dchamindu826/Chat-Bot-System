@@ -20,24 +20,25 @@ dotenv.config();
 
 const app = express();
 
-// 🔥 STEP 1: CORS SETUP (MUST BE AT THE TOP)
-// Database එකට කලින් මේක රන් වෙන්න ඕන.
+// 🔥 FIXED CORS SETUP
+// අපි "origin: true" වෙනුවට function එකක් පාවිච්චි කරනවා.
+// මේකෙන් එන ඕනම request එකකට "ඔයාට එන්න පුළුවන්" කියලා හරියටම කියනවා.
 app.use(cors({
-    origin: true, // Allow any origin dynamically
+    origin: function (origin, callback) {
+        // Allow requests with no origin (like mobile apps or curl requests)
+        if (!origin) return callback(null, true);
+        
+        // Allow any origin dynamically
+        return callback(null, true);
+    },
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-    credentials: true,
+    credentials: true, // Cookies/Tokens allow කරන්න
     allowedHeaders: ["Content-Type", "token", "Authorization", "X-Requested-With"]
 }));
 
-// 🔥 STEP 2: HANDLE PREFLIGHT REQUESTS MANUALLY
-// OPTIONS ආවම DB එකට යන්න එපා, කෙලින්ම 200 එවන්න.
-app.options('*', (req, res) => {
-    res.sendStatus(200);
-});
-
 app.use(express.json());
 
-// 🔥 DB CONNECTION LOGIC
+// 🔥 DB CONNECTION (Stable Version)
 let isConnected = false; 
 
 const connectDB = async () => {
@@ -58,9 +59,9 @@ const connectDB = async () => {
   }
 };
 
-// 🔥 STEP 3: MIDDLEWARE (SKIP DB FOR 'OPTIONS')
-// OPTIONS request එකක් නම් DB connect වෙන්න බලන් ඉන්න එපා.
+// Middleware to ensure DB connection
 app.use(async (req, res, next) => {
+    // OPTIONS requests වලට DB connect වෙන්න එපා (Fast response)
     if (req.method === 'OPTIONS') {
         return next();
     }
