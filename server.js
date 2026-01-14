@@ -13,8 +13,6 @@ const messagesRoute = require("./routes/messages");
 const analyticsRoute = require("./routes/analytics");
 const teamRoute = require('./routes/team');
 const crmRoute = require("./routes/crm");
-
-// 🔥 NEW IMPORTS (Broadcast & Cron)
 const broadcastRoute = require("./routes/broadcast"); 
 const cronRoute = require("./routes/cron"); 
 
@@ -22,20 +20,24 @@ dotenv.config();
 
 const app = express();
 
-// 🔥 CORS SETUP (Allow All Origins)
+// 🔥 STEP 1: CORS SETUP (MUST BE AT THE TOP)
+// Database එකට කලින් මේක රන් වෙන්න ඕන.
 app.use(cors({
-    origin: true, // Allow any domain
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    origin: true, // Allow any origin dynamically
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     credentials: true,
-    allowedHeaders: ["Content-Type", "token", "Authorization"]
+    allowedHeaders: ["Content-Type", "token", "Authorization", "X-Requested-With"]
 }));
 
-// Handle Preflight Requests
-app.options('*', cors());
+// 🔥 STEP 2: HANDLE PREFLIGHT REQUESTS MANUALLY
+// OPTIONS ආවම DB එකට යන්න එපා, කෙලින්ම 200 එවන්න.
+app.options('*', (req, res) => {
+    res.sendStatus(200);
+});
 
 app.use(express.json());
 
-// 🔥 VERCEL OPTIMIZED DB CONNECTION
+// 🔥 DB CONNECTION LOGIC
 let isConnected = false; 
 
 const connectDB = async () => {
@@ -43,14 +45,12 @@ const connectDB = async () => {
     console.log("Using existing DB connection ✅");
     return;
   }
-
   try {
     const db = await mongoose.connect(process.env.MONGO_URL, {
       serverSelectionTimeoutMS: 5000, 
       socketTimeoutMS: 45000,
       family: 4 
     });
-
     isConnected = db.connections[0].readyState;
     console.log("New DB Connection Established ✅");
   } catch (err) {
@@ -58,14 +58,15 @@ const connectDB = async () => {
   }
 };
 
-// Middleware: Ensure DB is connected
+// 🔥 STEP 3: MIDDLEWARE (SKIP DB FOR 'OPTIONS')
+// OPTIONS request එකක් නම් DB connect වෙන්න බලන් ඉන්න එපා.
 app.use(async (req, res, next) => {
+    if (req.method === 'OPTIONS') {
+        return next();
+    }
     await connectDB();
     next();
 });
-
-// NOTE: startScheduler() removed because Vercel kills background processes.
-// We use /api/cron/run route instead.
 
 app.get("/", (req, res) => {
   res.send("SmartReply CRM Backend is Running! 🚀");
@@ -81,8 +82,6 @@ app.use("/api/messages", messagesRoute);
 app.use("/api/analytics", analyticsRoute);
 app.use("/api/team", teamRoute);
 app.use("/api/crm", crmRoute);
-
-// 🔥 ENABLE NEW FEATURES
 app.use("/api/broadcast", broadcastRoute); 
 app.use("/api/cron", cronRoute); 
 
@@ -99,5 +98,4 @@ if (process.env.NODE_ENV !== 'production') {
     });
 }
 
-// For Vercel
 module.exports = app;
