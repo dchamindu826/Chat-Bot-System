@@ -14,8 +14,9 @@ const analyticsRoute = require("./routes/analytics");
 const teamRoute = require('./routes/team');
 const crmRoute = require("./routes/crm");
 
-// 🔥 NOTE: Broadcast & Templates තාම හදලා නැති නිසා ඒවා මෙතනින් අයින් කළා.
-// නැත්නම් Server එක Crash වෙනවා.
+// 🔥 NEW IMPORTS
+const broadcastRoute = require("./routes/broadcast"); 
+const startScheduler = require("./cron/scheduler"); 
 
 dotenv.config();
 
@@ -30,8 +31,8 @@ app.use(cors({
 
 app.use(express.json());
 
-// 🔥 VERCEL OPTIMIZED DB CONNECTION (Caching Fix)
-let isConnected = false; // Track connection status
+// 🔥 VERCEL OPTIMIZED DB CONNECTION
+let isConnected = false; 
 
 const connectDB = async () => {
   if (isConnected) {
@@ -41,9 +42,9 @@ const connectDB = async () => {
 
   try {
     const db = await mongoose.connect(process.env.MONGO_URL, {
-      serverSelectionTimeoutMS: 5000, // Timeout after 5s (Fail fast)
+      serverSelectionTimeoutMS: 5000, 
       socketTimeoutMS: 45000,
-      family: 4 // IPv4 Force
+      family: 4 
     });
 
     isConnected = db.connections[0].readyState;
@@ -53,11 +54,14 @@ const connectDB = async () => {
   }
 };
 
-// 🔥 MIDDLEWARE: Ensure DB is connected before handling ANY request
+// Middleware: Ensure DB is connected
 app.use(async (req, res, next) => {
     await connectDB();
     next();
 });
+
+// 🔥 START SCHEDULER (Only runs when server is active)
+startScheduler();
 
 app.get("/", (req, res) => {
   res.send("SmartReply CRM Backend is Running! 🚀");
@@ -73,6 +77,9 @@ app.use("/api/messages", messagesRoute);
 app.use("/api/analytics", analyticsRoute);
 app.use("/api/team", teamRoute);
 app.use("/api/crm", crmRoute);
+
+// 🔥 ENABLE BROADCAST ROUTE
+app.use("/api/broadcast", broadcastRoute); 
 
 // 404 handler
 app.use((req, res) => {
