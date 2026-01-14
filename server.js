@@ -14,20 +14,24 @@ const analyticsRoute = require("./routes/analytics");
 const teamRoute = require('./routes/team');
 const crmRoute = require("./routes/crm");
 
-// 🔥 NEW IMPORTS
+// 🔥 NEW IMPORTS (Broadcast & Cron)
 const broadcastRoute = require("./routes/broadcast"); 
-app.use("/api/cron", cronRoute);
+const cronRoute = require("./routes/cron"); 
 
 dotenv.config();
 
 const app = express();
 
+// 🔥 CORS SETUP (Allow All Origins)
 app.use(cors({
-    origin: "*", 
+    origin: true, // Allow any domain
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     credentials: true,
     allowedHeaders: ["Content-Type", "token", "Authorization"]
 }));
+
+// Handle Preflight Requests
+app.options('*', cors());
 
 app.use(express.json());
 
@@ -60,8 +64,8 @@ app.use(async (req, res, next) => {
     next();
 });
 
-// 🔥 START SCHEDULER (Only runs when server is active)
-startScheduler();
+// NOTE: startScheduler() removed because Vercel kills background processes.
+// We use /api/cron/run route instead.
 
 app.get("/", (req, res) => {
   res.send("SmartReply CRM Backend is Running! 🚀");
@@ -78,8 +82,9 @@ app.use("/api/analytics", analyticsRoute);
 app.use("/api/team", teamRoute);
 app.use("/api/crm", crmRoute);
 
-// 🔥 ENABLE BROADCAST ROUTE
+// 🔥 ENABLE NEW FEATURES
 app.use("/api/broadcast", broadcastRoute); 
+app.use("/api/cron", cronRoute); 
 
 // 404 handler
 app.use((req, res) => {
