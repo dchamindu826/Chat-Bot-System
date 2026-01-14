@@ -15,13 +15,15 @@ const teamRoute = require('./routes/team');
 const crmRoute = require("./routes/crm");
 const broadcastRoute = require("./routes/broadcast"); 
 const cronRoute = require("./routes/cron"); 
-const templateRoute = require("./routes/templates"); // 🔥 IMPORT TEMPLATES
+
+// 🔥 NEW IMPORT (මේ ෆයිල් එක routes ෆෝල්ඩර් එකේ තියෙන්නම ඕන)
+const templateRoute = require("./routes/templates"); 
 
 dotenv.config();
 
 const app = express();
 
-// 🔥 CORS SETUP
+// 🔥 FIXED CORS SETUP (ඔයාගේ වැඩ කරන පරණ කෝඩ් එකමයි)
 app.use(cors({
     origin: function (origin, callback) {
         if (!origin) return callback(null, true);
@@ -34,7 +36,7 @@ app.use(cors({
 
 app.use(express.json());
 
-// 🔥 DB CONNECTION
+// 🔥 DB CONNECTION (Stable Version)
 let isConnected = false; 
 
 const connectDB = async () => {
@@ -55,7 +57,7 @@ const connectDB = async () => {
   }
 };
 
-// Middleware: Ensure DB is connected
+// Middleware to ensure DB connection
 app.use(async (req, res, next) => {
     if (req.method === 'OPTIONS') {
         return next();
@@ -79,8 +81,10 @@ app.use("/api/analytics", analyticsRoute);
 app.use("/api/team", teamRoute);
 app.use("/api/crm", crmRoute);
 app.use("/api/broadcast", broadcastRoute); 
-app.use("/api/cron", cronRoute);
-app.use("/api/templates", templateRoute); // 🔥 ENABLE TEMPLATE ROUTE
+app.use("/api/cron", cronRoute); 
+
+// 🔥 NEW ROUTE (Templates)
+app.use("/api/templates", templateRoute);
 
 // 404 handler
 app.use((req, res) => {
