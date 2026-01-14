@@ -1,4 +1,3 @@
-// models/User.js
 const mongoose = require("mongoose");
 
 const UserSchema = new mongoose.Schema(
@@ -8,13 +7,15 @@ const UserSchema = new mongoose.Schema(
     password: { type: String, required: true },
     role: { type: String, default: "user" }, // user, admin, agent
     
-    // Me field eka aniwaryen ona Agent wa Owner ta link karanna
     ownerId: { type: String, required: false }, 
     
     businessName: { type: String, default: "" },
     phone: { type: String, default: "" },
+    status: { type: String, default: "active" }, // Active status field added just in case
+
     whatsappConfig: {
       phoneNumberId: { type: String, default: "" },
+      wabaId: { type: String, default: "" }, // 🔥 NEW: WABA ID ADDED HERE
       accessToken: { type: String, default: "" },
     },
   },

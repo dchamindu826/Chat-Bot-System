@@ -15,30 +15,26 @@ const teamRoute = require('./routes/team');
 const crmRoute = require("./routes/crm");
 const broadcastRoute = require("./routes/broadcast"); 
 const cronRoute = require("./routes/cron"); 
+const templateRoute = require("./routes/templates"); // 🔥 IMPORT TEMPLATES
 
 dotenv.config();
 
 const app = express();
 
-// 🔥 FIXED CORS SETUP
-// අපි "origin: true" වෙනුවට function එකක් පාවිච්චි කරනවා.
-// මේකෙන් එන ඕනම request එකකට "ඔයාට එන්න පුළුවන්" කියලා හරියටම කියනවා.
+// 🔥 CORS SETUP
 app.use(cors({
     origin: function (origin, callback) {
-        // Allow requests with no origin (like mobile apps or curl requests)
         if (!origin) return callback(null, true);
-        
-        // Allow any origin dynamically
         return callback(null, true);
     },
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-    credentials: true, // Cookies/Tokens allow කරන්න
+    credentials: true,
     allowedHeaders: ["Content-Type", "token", "Authorization", "X-Requested-With"]
 }));
 
 app.use(express.json());
 
-// 🔥 DB CONNECTION (Stable Version)
+// 🔥 DB CONNECTION
 let isConnected = false; 
 
 const connectDB = async () => {
@@ -59,9 +55,8 @@ const connectDB = async () => {
   }
 };
 
-// Middleware to ensure DB connection
+// Middleware: Ensure DB is connected
 app.use(async (req, res, next) => {
-    // OPTIONS requests වලට DB connect වෙන්න එපා (Fast response)
     if (req.method === 'OPTIONS') {
         return next();
     }
@@ -84,7 +79,8 @@ app.use("/api/analytics", analyticsRoute);
 app.use("/api/team", teamRoute);
 app.use("/api/crm", crmRoute);
 app.use("/api/broadcast", broadcastRoute); 
-app.use("/api/cron", cronRoute); 
+app.use("/api/cron", cronRoute);
+app.use("/api/templates", templateRoute); // 🔥 ENABLE TEMPLATE ROUTE
 
 // 404 handler
 app.use((req, res) => {

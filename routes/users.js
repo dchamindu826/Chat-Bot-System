@@ -1,7 +1,6 @@
 const router = require('express').Router();
 const User = require('../models/User');
 const BotConfig = require('../models/BotConfig');
-const SystemLog = require('../models/SystemLog');
 const { verifyTokenAndAdmin } = require('../verifyToken');
 const CryptoJS = require("crypto-js");
 const jwt = require("jsonwebtoken");
@@ -20,7 +19,7 @@ router.get('/clients', verifyTokenAndAdmin, async (req, res) => {
   }
 });
 
-// 2. CREATE CLIENT (Updated to save WhatsApp Config)
+// 2. CREATE CLIENT
 router.post('/client', verifyTokenAndAdmin, async (req, res) => {
     try {
         const encryptedPassword = CryptoJS.AES.encrypt(
@@ -37,7 +36,7 @@ router.post('/client', verifyTokenAndAdmin, async (req, res) => {
             phone: req.body.phone,
             status: 'active',
             
-            // ✅ MEKA ADD KALA: Aluth client kenek hadaddima API keys save wenna
+            // ✅ WABA ID will be included inside whatsappConfig from frontend
             whatsappConfig: req.body.whatsappConfig 
         });
         
@@ -48,7 +47,7 @@ router.post('/client', verifyTokenAndAdmin, async (req, res) => {
     }
 });
 
-// 3. UPDATE CLIENT (Already correct, but good to double check)
+// 3. UPDATE CLIENT
 router.put('/client/:id', verifyTokenAndAdmin, async (req, res) => {
   try {
     if (req.body.password) {
@@ -61,7 +60,7 @@ router.put('/client/:id', verifyTokenAndAdmin, async (req, res) => {
     const updatedUser = await User.findByIdAndUpdate(
       req.params.id,
       { 
-        $set: req.body // Meken whatsappConfig ekath auto update wenawa
+        $set: req.body 
       },
       { new: true }
     );
@@ -82,14 +81,14 @@ router.delete('/client/:id', verifyTokenAndAdmin, async (req, res) => {
   }
 });
 
-// 5. GHOST LOGIN ROUTE
+// 5. GHOST LOGIN
 router.post('/ghost-login/:id', verifyTokenAndAdmin, async (req, res) => {
   try {
     const user = await User.findById(req.params.id);
     if (!user) return res.status(404).json("User not found!");
 
     const accessToken = jwt.sign(
-      { id: user._id, role: user.role },
+      { id: user._id, role: user.role, businessName: user.businessName },
       process.env.JWT_SEC,
       { expiresIn: "3d" }
     );
@@ -97,26 +96,6 @@ router.post('/ghost-login/:id', verifyTokenAndAdmin, async (req, res) => {
     const { password, ...others } = user._doc;
     res.status(200).json({ ...others, accessToken });
 
-  } catch (err) {
-    res.status(500).json(err);
-  }
-});
-
-// 6. GET ALL USERS
-router.get("/", verifyTokenAndAdmin, async (req, res) => {
-  try {
-    const users = await User.find().sort({ _id: -1 });
-    res.status(200).json(users);
-  } catch (err) {
-    res.status(500).json(err);
-  }
-});
-
-// 7. DELETE USER
-router.delete("/:id", verifyTokenAndAdmin, async (req, res) => {
-  try {
-    await User.findByIdAndDelete(req.params.id);
-    res.status(200).json("User has been deleted...");
   } catch (err) {
     res.status(500).json(err);
   }
