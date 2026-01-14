@@ -9,7 +9,6 @@ const BotConfig = require("../models/BotConfig");
 const ChatSession = require("../models/ChatSession");
 
 // 🔥 NEW: Session Timeout Config (3 Days = 72 Hours)
-// දවස් 3කට පස්සේ Customer මැසේජ් කළොත් Bot මුල ඉඳන් පටන් ගනී
 const SESSION_TIMEOUT = 3 * 24 * 60 * 60 * 1000; 
 
 // DB Connection
@@ -26,20 +25,17 @@ const connectDB = async () => {
 // 🔥 SUPER FUNCTION: Download from Facebook -> Upload to Cloudinary
 const processMedia = async (mediaId, accessToken) => {
     try {
-        // 1. Get the URL from Facebook
         const urlRes = await axios.get(`https://graph.facebook.com/v17.0/${mediaId}`, {
             headers: { Authorization: `Bearer ${accessToken}` }
         });
         const fbUrl = urlRes.data.url;
 
-        // 2. Download the binary data (Buffer)
         const mediaRes = await axios.get(fbUrl, {
             headers: { Authorization: `Bearer ${accessToken}` },
             responseType: 'arraybuffer' 
         });
         const buffer = Buffer.from(mediaRes.data);
 
-        // 3. Upload to Cloudinary
         const formData = new FormData();
         formData.append('file', buffer, { filename: 'media_file' }); 
         formData.append('upload_preset', 'Chat Bot System'); 
@@ -91,6 +87,23 @@ router.post("/", async (req, res) => {
       for (const entry of body.entry) {
         for (const change of entry.changes) {
           const value = change.value;
+
+          // 🔥🔥🔥 START: NEW CODE FOR STATUS LOGGING 🔥🔥🔥
+          // Broadcast එක Failed ද කියලා බලන්න මේ කොටස දැම්මා
+          if (value.statuses && value.statuses.length > 0) {
+             const statusObj = value.statuses[0];
+             const status = statusObj.status;
+             const phone = statusObj.recipient_id;
+             
+             console.log(`📉 Status Update for ${phone}: ${status}`);
+             
+             if (status === "failed") {
+                 // මෙන්න මේ Error එක තමයි අපිට ඕන Broadcast එක ෆේල් වෙන්න හේතුව හොයන්න
+                 console.error("❌ Delivery Failed Reason:", JSON.stringify(statusObj.errors, null, 2));
+             }
+             continue; // Status update එකක් නම් මැසේජ් එකක් විදියට process කරන්න එපා
+          }
+          // 🔥🔥🔥 END: NEW CODE 🔥🔥🔥
 
           if (value.messages && value.messages.length > 0) {
             const phone_number_id = value.metadata.phone_number_id;
