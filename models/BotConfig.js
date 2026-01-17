@@ -1,6 +1,9 @@
 const mongoose = require("mongoose");
 
 const BotConfigSchema = new mongoose.Schema({
+  // 🔥🔥🔥 UPDATE: userId Field එක එකතු කළා (StrictModeError එක නවත්වන්න)
+  userId: { type: String }, 
+
   ownerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
   
   // Bot Steps
@@ -9,7 +12,7 @@ const BotConfigSchema = new mongoose.Schema({
       id: { type: Number },
       text: { type: String }, // Message text
       
-      // ✅ ME TIKA ADD KALA (Media save wenna meka ona)
+      // Media save wenna meka ona
       media: { type: String, default: "" }, // Image/Video URL
       mediaType: { type: String, default: "text" }, // 'image', 'video', 'document'
       fileName: { type: String, default: "" }, // File name for documents
@@ -18,7 +21,7 @@ const BotConfigSchema = new mongoose.Schema({
     }
   ],
 
-  // ✅ Bot ON/OFF Status
+  // Bot ON/OFF Status
   isActive: { type: Boolean, default: true }
 
 }, { timestamps: true });
