@@ -2,73 +2,69 @@ const router = require('express').Router();
 const BotConfig = require('../models/BotConfig');
 const { verifyToken } = require('../verifyToken');
 
-// SAVE Bot Config
+// 1. SAVE Bot Config (Fixed for ID & Active Status)
 router.post('/save', verifyToken, async (req, res) => {
   console.log("📥 Bot Config Save Request:", req.body);
 
-  const { userId, replies } = req.body;
+  // 🔥 Fix 1: Frontend එකෙන් එන ownerId හෝ userId දෙකෙන් ඕන එකක් ගන්නවා
+  const targetId = req.body.ownerId || req.body.userId; 
+  const { replies, isActive } = req.body;
 
-  // 1. Validation
-  if (!userId) {
-    console.error("❌ Save Failed: userId is missing.");
+  // Validation
+  if (!targetId) {
+    console.error("❌ Save Failed: Target ID is missing.");
     return res.status(400).json({ message: "User ID is required!" });
   }
 
   try {
-    // 2. Smart Save (Upsert)
-    // මේකෙන් කරන්නේ: Record එක තියෙනවා නම් Update කරනවා, නැත්නම් අලුතෙන් හදනවා.
-    // වැදගත්ම දේ: අපි ownerId සහ userId කියන ෆීල්ඩ් දෙකටම ID එක දානවා.
-    // එතකොට අර "userId: null" කියන error එක එන්නේ නෑ.
-    
+    // 🔥 Fix 2: findOneAndUpdate පාවිච්චි කිරීම (Duplicate Error එන්නේ නෑ)
     const config = await BotConfig.findOneAndUpdate(
-      { ownerId: userId }, // හොයන ෆීල්ඩ් එක
+      { $or: [{ ownerId: targetId }, { userId: targetId }] }, // ID දෙකෙන් ඕන එකක් තිබ්බොත් අල්ලනවා
       { 
         $set: {
-          ownerId: userId,
-          userId: userId, // ⚠️ මේක දැම්මාම අර Index Error එක විසඳෙනවා
-          replies: replies
+          ownerId: targetId,
+          userId: targetId, // ⚠️ userId එකත් අනිවාර්යයෙන් Update කරනවා (Null වෙන්න දෙන්නේ නෑ)
+          replies: replies,
+          isActive: isActive // 🔥 Fix 3: ON/OFF status එකත් save කරනවා
         }
       },
-      { new: true, upsert: true, setDefaultsOnInsert: true } // Options
+      { new: true, upsert: true, setDefaultsOnInsert: true } // නැත්නම් අලුතින් හදනවා
     );
     
-    console.log("✅ Bot Config Saved Successfully for:", userId);
+    console.log("✅ Bot Config Saved Successfully for:", targetId);
     res.status(200).json(config);
 
   } catch (err) {
     console.error("❌ Database Error:", err);
-    
-    // Duplicate Error එකක් ආවොත් User ට තේරෙන විදියට කියමු
-    if (err.code === 11000) {
-        return res.status(400).json({ message: "Configuration already exists. Please try again or clear database." });
-    }
-    
     res.status(500).json({ message: "Database Error", error: err.message });
   }
 });
 
-// GET Bot Config (Admin View)
+// 2. GET Bot Config (Admin View)
 router.get('/:userId', async (req, res) => {
   try {
     if (!req.params.userId || req.params.userId === 'undefined') {
         return res.status(400).json({ message: "Invalid User ID" });
     }
-    // ownerId හෝ userId දෙකෙන් ඕන එකකින් හොයන්න පුළුවන් විදියට
+    
     const config = await BotConfig.findOne({ 
         $or: [ { ownerId: req.params.userId }, { userId: req.params.userId } ]
     });
     
-    res.status(200).json(config ? config.replies : []);
+    // Config නැත්නම් Default හිස් එකක් යවනවා (Frontend එක කැඩෙන්නේ නැති වෙන්න)
+    res.status(200).json(config ? config : { replies: [], isActive: true });
   } catch (err) {
     res.status(500).json(err);
   }
 });
 
-// GET Bot Config (My Config)
+// 3. GET Bot Config (My Config - For Users)
 router.get('/my/config', verifyToken, async (req, res) => {
   try {
-    const config = await BotConfig.findOne({ ownerId: req.user.id });
-    res.status(200).json(config ? config.replies : []);
+    const config = await BotConfig.findOne({ 
+        $or: [ { ownerId: req.user.id }, { userId: req.user.id } ]
+    });
+    res.status(200).json(config ? config : { replies: [], isActive: true });
   } catch (err) {
     res.status(500).json(err);
   }
