@@ -10,8 +10,8 @@ const ChatSession = require("../models/ChatSession");
 
 // 🔥 CONFIGURATIONS
 const SESSION_TIMEOUT = 3 * 24 * 60 * 60 * 1000; // 3 Days
-const MESSAGE_COOLDOWN = 1000; // 🔥 1 Second Cooldown (Burst Messages නවත්වන්න)
-const BOT_TYPING_DELAY = 2500; // 🔥 2.5 Seconds Waiting Time (Bot හිතලා යවනවා වගේ පේන්න)
+const MESSAGE_COOLDOWN = 2000; // 🔥 2 Seconds Cooldown (Bot එක පැටලෙන්නේ නැති වෙන්න වේගෙන් එන මැසේජ් Ignore කරනවා)
+const BOT_TYPING_DELAY = 1500; // 🔥 1.5 Seconds Delay (Bot හිතලා යවනවා වගේ පේන්න)
 
 // DB Connection
 const connectDB = async () => {
@@ -77,7 +77,8 @@ router.get("/", (req, res) => {
   }
 });
 
-// 🔥 1.1 CRON JOB PING ROUTE (මෙන්න මේක තමයි Cron Job එකට දෙන Link එක)
+// 🔥 1.1 CRON JOB PING ROUTE (මේක තමයි Cron Job එකට දෙන Link එක)
+// මේකට Request එකක් ආවම Server එක ඇහැරෙනවා.
 router.get("/ping", (req, res) => {
     console.log("🔔 Keep-Alive Ping Received - Preventing Cold Boot");
     res.status(200).send("Pong! Server is Awake 🚀");
@@ -96,13 +97,10 @@ router.post("/", async (req, res) => {
         for (const change of entry.changes) {
           const value = change.value;
 
-          // 🔥 Status Updates Logging
+          // 🔥 Status Updates Logging (Sent, Delivered, Read ignore කරනවා)
           if (value.statuses && value.statuses.length > 0) {
              const statusObj = value.statuses[0];
              const status = statusObj.status;
-             const phone = statusObj.recipient_id;
-             
-             console.log(`📉 Status Update for ${phone}: ${status}`);
              
              if (status === "failed") {
                  console.error("❌ Delivery Failed Reason:", JSON.stringify(statusObj.errors, null, 2));
@@ -208,14 +206,14 @@ router.post("/", async (req, res) => {
                 }
 
                 // 🔥 2. SPAM PROTECTION (BURST HANDLING)
-                // client එක දිගට මැසේජ් 3ක් එව්වොත්, පළවෙනි එක අරගෙන අනිත් ඒවා Ignore කරනවා.
-                // නැත්නම් Bot එක දිගට reply 3ක් යවනවා (පියවර පනිනවා).
+                // මැසේජ් දෙකක් අතර තත්පර 2ක පරතරයක් නැත්නම්, අපි අලුත් මැසේජ් එක Ignore කරනවා.
+                // මේකෙන් Bot එක දිගට පියවර පැනීම නවතිනවා.
                 if (timeDiff < MESSAGE_COOLDOWN && session.currentStep > 0) {
                     console.log(`🚦 Burst Protection: Ignoring rapid message from ${from}`);
                     continue; 
                 }
 
-                // 🔥 3. LOCK SESSION (Prevent parallel triggers)
+                // 🔥 3. LOCK SESSION (Update Time)
                 session.lastActive = Date.now(); 
                 await session.save();
 
@@ -231,21 +229,22 @@ router.post("/", async (req, res) => {
                     const replyToSend = botConfig.replies[session.currentStep];
                     
                     // 🔥 ARTIFICIAL DELAY (Typing Effect)
-                    // මේකෙන් තමයි Bot එක මැසේජ් එකක් යවන්න කලින් තත්පර 2.5ක් ඉන්නේ
-                    await new Promise(resolve => setTimeout(resolve, BOT_TYPING_DELAY));
+                    // මේකෙන් Bot එක තත්පර 1.5ක් ඉඳලා තමයි රිප්ලයි කරන්නේ.
+                    setTimeout(async () => {
+                        await sendWhatsAppMessage(client, from, replyToSend);
 
-                    await sendWhatsAppMessage(client, from, replyToSend);
-
-                    await Message.create({
-                        contactId: contact._id,
-                        text: replyToSend.text || (replyToSend.media ? "Bot Media" : "Bot Reply"),
-                        sender: "me",
-                        ownerId: client._id,
-                        isBotReply: true
-                    });
+                        await Message.create({
+                            contactId: contact._id,
+                            text: replyToSend.text || (replyToSend.media ? "Bot Media" : "Bot Reply"),
+                            sender: "me",
+                            ownerId: client._id,
+                            isBotReply: true
+                        });
+                    }, BOT_TYPING_DELAY);
 
                     session.currentStep += 1;
-                    session.lastActive = Date.now(); // Update time again after delay
+                    // Update time again inside timeout usually, but here fine for flow
+                    session.lastActive = Date.now(); 
                     await session.save();
                 } else {
                     console.log(`🚫 STOPPED: All steps finished for ${from}.`);
@@ -288,11 +287,11 @@ const sendWhatsAppMessage = async (client, to, replyStep) => {
           if (!videoUrl.endsWith(".mp4")) { videoUrl = videoUrl + ".mp4"; }
           body.video = { link: videoUrl, caption: replyStep.text || "" };
       } 
-      // --- AUDIO ---
+      // --- AUDIO (New Fix) ---
       else if (type === "audio") {
           let audioUrl = replyStep.media;
           if (!audioUrl.endsWith(".mp3")) { audioUrl = audioUrl + ".mp3"; }
-          body.audio = { link: audioUrl }; // No Caption
+          body.audio = { link: audioUrl }; // Audio walata caption danna ba
       }
       // --- DOC ---
       else if (type === "document") {
