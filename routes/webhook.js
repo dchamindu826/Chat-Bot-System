@@ -1,7 +1,7 @@
 const router = require("express").Router();
 const axios = require("axios");
 const mongoose = require("mongoose");
-const FormData = require("form-data"); // 🔥 REQUIRED FOR CLOUDINARY UPLOAD
+const FormData = require("form-data");
 const User = require("../models/User");
 const Contact = require("../models/Contact");
 const Message = require("../models/Message");
@@ -9,9 +9,9 @@ const BotConfig = require("../models/BotConfig");
 const ChatSession = require("../models/ChatSession");
 
 // 🔥 CONFIGURATIONS
-const SESSION_TIMEOUT = 3 * 24 * 60 * 60 * 1000; // 3 Days
-const MESSAGE_COOLDOWN = 1000; // 1 Second Cooldown
-const BOT_TYPING_DELAY = 1500; // 1.5 Seconds Delay
+const SESSION_TIMEOUT = 3 * 24 * 60 * 60 * 1000; 
+const MESSAGE_COOLDOWN = 1000; 
+const BOT_TYPING_DELAY = 1500; 
 
 // DB Connection
 const connectDB = async () => {
@@ -24,83 +24,51 @@ const connectDB = async () => {
   }
 };
 
-// 🔥 SUPER FUNCTION: Download from Facebook -> Upload to Cloudinary
+// Cloudinary Media Processor
 const processMedia = async (mediaId, accessToken) => {
     try {
-        const urlRes = await axios.get(`https://graph.facebook.com/v17.0/${mediaId}`, {
-            headers: { Authorization: `Bearer ${accessToken}` }
-        });
-        const fbUrl = urlRes.data.url;
-
-        const mediaRes = await axios.get(fbUrl, {
-            headers: { Authorization: `Bearer ${accessToken}` },
-            responseType: 'arraybuffer' 
-        });
-        const buffer = Buffer.from(mediaRes.data);
-
+        const urlRes = await axios.get(`https://graph.facebook.com/v17.0/${mediaId}`, { headers: { Authorization: `Bearer ${accessToken}` } });
+        const mediaRes = await axios.get(urlRes.data.url, { headers: { Authorization: `Bearer ${accessToken}` }, responseType: 'arraybuffer' });
         const formData = new FormData();
-        formData.append('file', buffer, { filename: 'media_file' }); 
+        formData.append('file', Buffer.from(mediaRes.data), { filename: 'media_file' }); 
         formData.append('upload_preset', 'Chat Bot System'); 
         formData.append('cloud_name', 'dyixoaldi'); 
-
-        const uploadRes = await axios.post(
-            `https://api.cloudinary.com/v1_1/dyixoaldi/auto/upload`, 
-            formData,
-            { headers: { ...formData.getHeaders() } }
-        );
-
-        console.log("✅ Cloudinary Upload Success:", uploadRes.data.secure_url);
+        
+        const uploadRes = await axios.post(`https://api.cloudinary.com/v1_1/dyixoaldi/auto/upload`, formData, { headers: { ...formData.getHeaders() } });
         return uploadRes.data.secure_url; 
-
-    } catch (error) {
-        console.error("❌ Media Upload Error:", error.message);
-        return null;
-    }
+    } catch (error) { return null; }
 };
 
-// 1. VERIFICATION ROUTE
+// 1. Verification
 router.get("/", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
-  const myVerifyToken = process.env.VERIFY_TOKEN || "mysecrettoken";
-
-  if (mode && token) {
-    if (mode === "subscribe" && token === myVerifyToken) {
-      console.log("✅ Webhook Verified!");
+  if (mode && token && mode === "subscribe" && token === (process.env.VERIFY_TOKEN || "mysecrettoken")) {
       res.status(200).send(challenge);
-    } else {
-      res.sendStatus(403);
-    }
-  } else {
-    res.sendStatus(400);
-  }
+  } else { res.sendStatus(403); }
 });
 
-// 🔥 1.1 CRON JOB PING ROUTE
+// 2. Ping
 router.get("/ping", (req, res) => {
-    console.log("🔔 Ping Received - Server Awake 🚀");
     res.status(200).send("Pong!");
 });
 
-// 2. MESSAGE HANDLING ROUTE
+// 3. Message Handling
 router.post("/", async (req, res) => {
   res.status(200).send("EVENT_RECEIVED");
-
   try {
     await connectDB();
     const body = req.body;
-
     if (body.object === "whatsapp_business_account") {
       for (const entry of body.entry) {
         for (const change of entry.changes) {
           const value = change.value;
-
-          // 🔥 Status Updates Logging
+          
           if (value.statuses && value.statuses.length > 0) {
              const statusObj = value.statuses[0];
              if (statusObj.status === "failed") {
-                 console.error("❌ Delivery Failed Reason:", JSON.stringify(statusObj.errors, null, 2));
+                 console.error("❌ Delivery Failed:", JSON.stringify(statusObj.errors || statusObj, null, 2));
              }
              continue; 
           }
@@ -111,176 +79,102 @@ router.post("/", async (req, res) => {
             const from = msgObj.from;
             const msgType = msgObj.type; 
 
-            // 1. Client Find
             const client = await User.findOne({ "whatsappConfig.phoneNumberId": phone_number_id });
-            if (!client) {
-                console.error("❌ ERROR: No Client found for this Phone ID!");
-                continue; 
-            }
+            if (!client) continue; 
 
-            // ---------------------------------------------------------
-            // PART A: MEDIA HANDLING
-            // ---------------------------------------------------------
+            // Save Message
             let msgBody = "Media File";
             let mediaUrl = null;
-
-            if (msgType === "text") {
-                msgBody = msgObj.text.body;
-            } 
-            else if (["image", "video", "audio", "document", "voice", "sticker"].includes(msgType)) {
-                const mediaObj = msgObj[msgType];
-                const mediaId = mediaObj?.id;
-                const caption = mediaObj?.caption || "";
-                msgBody = caption || `📷 ${msgType.charAt(0).toUpperCase() + msgType.slice(1)} Received`;
-
-                if (mediaId) {
-                    mediaUrl = await processMedia(mediaId, client.whatsappConfig.accessToken);
-                }
+            if (msgType === "text") msgBody = msgObj.text.body;
+            else if (["image", "video", "audio", "document", "voice"].includes(msgType)) {
+                msgBody = msgObj[msgType].caption || `📷 ${msgType} Received`;
+                if (msgObj[msgType].id) mediaUrl = await processMedia(msgObj[msgType].id, client.whatsappConfig.accessToken);
             }
 
-            // ---------------------------------------------------------
-            // PART B: CONTACT UPDATE
-            // ---------------------------------------------------------
             let contact = await Contact.findOne({ phoneNumber: from, ownerId: client._id });
+            if (!contact) contact = new Contact({ phoneNumber: from, ownerId: client._id, name: `Guest ${from.slice(-4)}` });
             
-            if (!contact) {
-              contact = new Contact({
-                phoneNumber: from,
-                ownerId: client._id,
-                name: `Guest ${from.slice(-4)}`,
-                callStatus: "Pending",
-                priority: "Low",
-                messageCount: 0,
-                unreadCount: 0
-              });
-            }
-
-            const currentMsgCount = (contact.messageCount || 0) + 1;
-            let newPriority = "Low";
-            if (currentMsgCount >= 2 && currentMsgCount < 4) newPriority = "Medium";
-            if (currentMsgCount >= 4) newPriority = "High"; 
-
             contact.lastMessage = msgBody;
             contact.lastMessageTime = new Date();
-            contact.messageCount = currentMsgCount;
-            contact.priority = newPriority;
             contact.unreadCount = (contact.unreadCount || 0) + 1;
-            if (contact.assignedTo) contact.callStatus = "Pending"; 
             await contact.save();
 
-            // ---------------------------------------------------------
-            // PART C: SAVE MESSAGE
-            // ---------------------------------------------------------
-            await Message.create({
-              contactId: contact._id,
-              text: msgBody,
-              sender: "customer",
-              ownerId: client._id,
-              type: msgType === 'voice' ? 'audio' : msgType, 
-              mediaUrl: mediaUrl 
-            });
+            await Message.create({ contactId: contact._id, text: msgBody, sender: "customer", ownerId: client._id, type: msgType === 'voice' ? 'audio' : msgType, mediaUrl: mediaUrl });
 
-            // ---------------------------------------------------------
-            // PART D: BOT LOGIC (WITH DELAY & BURST HANDLING)
-            // ---------------------------------------------------------
+            // Bot Logic
             const botConfig = await BotConfig.findOne({ ownerId: client._id });
-
-            if (botConfig && botConfig.isActive && botConfig.replies && botConfig.replies.length > 0) {
+            if (botConfig && botConfig.isActive && botConfig.replies.length > 0) {
                 let session = await ChatSession.findOne({ userId: client._id, phoneNumber: from });
+                if (!session) session = new ChatSession({ userId: client._id, phoneNumber: from, currentStep: 0, lastActive: Date.now() });
+
+                const timeDiff = Date.now() - new Date(session.lastActive).getTime();
                 
-                if (!session) {
-                    session = new ChatSession({ userId: client._id, phoneNumber: from, currentStep: 0, lastActive: Date.now() });
-                }
-
-                const currentTime = Date.now();
-                const lastActiveTime = new Date(session.lastActive).getTime();
-                const timeDiff = currentTime - lastActiveTime;
-
-                // 1. TIMEOUT RESET
-                if (timeDiff > SESSION_TIMEOUT) {
-                    console.log(`⏳ Session Timeout for ${from}. Resetting Bot.`);
-                    session.currentStep = 0; 
-                }
-
-                // 2. SPAM PROTECTION
+                if (timeDiff > SESSION_TIMEOUT) session.currentStep = 0; 
+                
+                // Burst Protection
                 if (timeDiff < MESSAGE_COOLDOWN && session.currentStep > 0) {
                     console.log(`🚦 Burst Protection: Ignoring rapid message from ${from}`);
                     continue; 
                 }
 
-                // 3. LOCK SESSION
-                session.lastActive = Date.now(); 
-                await session.save();
+                if ((msgObj.text?.body || "").toLowerCase().match(/hi|start|menu/)) session.currentStep = 0;
 
-                // 4. CHECK KEYWORD RESET
-                const lowerMsg = (msgObj.text?.body || "").toLowerCase();
-                if (lowerMsg.includes("hi") || lowerMsg.includes("start") || lowerMsg.includes("menu")) {
-                    console.log(`🔄 RESET TRIGGERED by keyword: "${msgBody}"`);
-                    session.currentStep = 0; 
-                }
-
-                // 5. SEND REPLY (WITH DELAY)
+                // Send Reply
                 if (session.currentStep < botConfig.replies.length) {
-                    const replyToSend = botConfig.replies[session.currentStep];
+                    const reply = botConfig.replies[session.currentStep];
                     
-                    // Artificial Delay
                     setTimeout(async () => {
-                        await sendWhatsAppMessage(client, from, replyToSend);
-
-                        await Message.create({
-                            contactId: contact._id,
-                            text: replyToSend.text || (replyToSend.media ? "Bot Media" : "Bot Reply"),
-                            sender: "me",
-                            ownerId: client._id,
-                            isBotReply: true
-                        });
+                        await sendWhatsAppMessage(client, from, reply);
+                        await Message.create({ contactId: contact._id, text: reply.text || "Bot Reply", sender: "me", ownerId: client._id, isBotReply: true });
                     }, BOT_TYPING_DELAY);
 
                     session.currentStep += 1;
-                    session.lastActive = Date.now(); 
+                    session.lastActive = Date.now();
                     await session.save();
                 } else {
-                    console.log(`🚫 STOPPED: All steps finished for ${from}.`);
+                    session.lastActive = Date.now();
+                    await session.save();
                 }
             }
           }
         }
       }
     }
-  } catch (err) {
-    console.error("❌ Webhook Error:", err.message);
-  }
+  } catch (err) { console.error("Webhook Error:", err.message); }
 });
 
-// Helper: Send Message (🔥 100% FIXED FOR AUDIO/VIDEO & CASE INSENSITIVE)
+// 🔥 Helper: Send Message (CORRECTED LOGIC FOR AUDIO VS VIDEO)
 const sendWhatsAppMessage = async (client, to, replyStep) => {
   try {
     const url = `https://graph.facebook.com/v17.0/${client.whatsappConfig.phoneNumberId}/messages`;
     const token = client.whatsappConfig.accessToken;
-
     let body = { messaging_product: "whatsapp", recipient_type: "individual", to: to };
 
     if (replyStep.media && replyStep.media.trim() !== "") {
-      let type = replyStep.mediaType || "image";
+      
+      // 1. TRUST THE FRONTEND TYPE FIRST (This fixes the Audio/Video confusion)
+      let type = replyStep.mediaType || "image"; 
       let mediaLink = replyStep.media.trim();
 
-      // Auto-detect type if generic
-      if (mediaLink.includes("/video/")) type = "video";
-      else if (mediaLink.includes("/audio/") || mediaLink.match(/\.(mp3|wav|ogg)$/i)) type = "audio";
-      else if (mediaLink.match(/\.(pdf|doc|docx|ppt)$/i) || mediaLink.includes("/raw/")) type = "document";
+      // 2. Only guess if generic 'file' or undefined
+      if (!type || type === 'file') {
+          if (mediaLink.match(/\.(mp3|wav|ogg)$/i)) type = "audio";
+          else if (mediaLink.match(/\.(mp4|mov|avi)$/i)) type = "video";
+          else if (mediaLink.includes("/video/") && !mediaLink.includes("/audio/")) type = "video"; 
+      }
 
       body.type = type;
 
-      // 🔥 FIX 1: Audio (.mp3) Handling (Case Insensitive)
+      // --- AUDIO HANDLING ---
       if (type === "audio") {
-          // Check if extension exists (ignoring case like .MP3)
-          if (!mediaLink.toLowerCase().endsWith(".mp3") && !mediaLink.toLowerCase().endsWith(".wav")) {
-              mediaLink = mediaLink + ".mp3"; // Force extension for Cloudinary to serve correct header
+          // Check extension case-insensitively
+          if (!mediaLink.toLowerCase().endsWith(".mp3")) {
+              mediaLink = mediaLink + ".mp3"; // WhatsApp needs this to play inline
           }
-          body.audio = { link: mediaLink }; // Audio cannot have captions
+          body.audio = { link: mediaLink }; // No Caption
       }
       
-      // 🔥 FIX 2: Video (.mp4) Handling
+      // --- VIDEO HANDLING ---
       else if (type === "video") {
           if (!mediaLink.toLowerCase().endsWith(".mp4")) {
               mediaLink = mediaLink + ".mp4";
@@ -288,12 +182,12 @@ const sendWhatsAppMessage = async (client, to, replyStep) => {
           body.video = { link: mediaLink, caption: replyStep.text || "" };
       }
       
-      // Documents
+      // --- DOCUMENTS ---
       else if (type === "document") {
           body.document = { link: mediaLink, caption: replyStep.text || "", filename: replyStep.fileName || "File.pdf" };
       }
       
-      // Images
+      // --- IMAGES ---
       else {
           body.image = { link: mediaLink, caption: replyStep.text || "" };
       }
