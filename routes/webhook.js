@@ -10,8 +10,8 @@ const ChatSession = require("../models/ChatSession");
 
 // 🔥 CONFIGURATIONS
 const SESSION_TIMEOUT = 3 * 24 * 60 * 60 * 1000; // 3 Days
-const MESSAGE_COOLDOWN = 2000; // 🔥 2 Seconds Cooldown (Bot එක පැටලෙන්නේ නැති වෙන්න වේගෙන් එන මැසේජ් Ignore කරනවා)
-const BOT_TYPING_DELAY = 1500; // 🔥 1.5 Seconds Delay (Bot හිතලා යවනවා වගේ පේන්න)
+const MESSAGE_COOLDOWN = 1000; // 1 Second Cooldown
+const BOT_TYPING_DELAY = 1500; // 1.5 Seconds Delay
 
 // DB Connection
 const connectDB = async () => {
@@ -77,11 +77,10 @@ router.get("/", (req, res) => {
   }
 });
 
-// 🔥 1.1 CRON JOB PING ROUTE (මේක තමයි Cron Job එකට දෙන Link එක)
-// මේකට Request එකක් ආවම Server එක ඇහැරෙනවා.
+// 🔥 1.1 CRON JOB PING ROUTE
 router.get("/ping", (req, res) => {
-    console.log("🔔 Keep-Alive Ping Received - Preventing Cold Boot");
-    res.status(200).send("Pong! Server is Awake 🚀");
+    console.log("🔔 Ping Received - Server Awake 🚀");
+    res.status(200).send("Pong!");
 });
 
 // 2. MESSAGE HANDLING ROUTE
@@ -97,12 +96,10 @@ router.post("/", async (req, res) => {
         for (const change of entry.changes) {
           const value = change.value;
 
-          // 🔥 Status Updates Logging (Sent, Delivered, Read ignore කරනවා)
+          // 🔥 Status Updates Logging
           if (value.statuses && value.statuses.length > 0) {
              const statusObj = value.statuses[0];
-             const status = statusObj.status;
-             
-             if (status === "failed") {
+             if (statusObj.status === "failed") {
                  console.error("❌ Delivery Failed Reason:", JSON.stringify(statusObj.errors, null, 2));
              }
              continue; 
@@ -205,15 +202,13 @@ router.post("/", async (req, res) => {
                     session.currentStep = 0; 
                 }
 
-                // 🔥 2. SPAM PROTECTION (BURST HANDLING)
-                // මැසේජ් දෙකක් අතර තත්පර 2ක පරතරයක් නැත්නම්, අපි අලුත් මැසේජ් එක Ignore කරනවා.
-                // මේකෙන් Bot එක දිගට පියවර පැනීම නවතිනවා.
+                // 2. SPAM PROTECTION
                 if (timeDiff < MESSAGE_COOLDOWN && session.currentStep > 0) {
                     console.log(`🚦 Burst Protection: Ignoring rapid message from ${from}`);
                     continue; 
                 }
 
-                // 🔥 3. LOCK SESSION (Update Time)
+                // 3. LOCK SESSION
                 session.lastActive = Date.now(); 
                 await session.save();
 
@@ -228,8 +223,7 @@ router.post("/", async (req, res) => {
                 if (session.currentStep < botConfig.replies.length) {
                     const replyToSend = botConfig.replies[session.currentStep];
                     
-                    // 🔥 ARTIFICIAL DELAY (Typing Effect)
-                    // මේකෙන් Bot එක තත්පර 1.5ක් ඉඳලා තමයි රිප්ලයි කරන්නේ.
+                    // Artificial Delay
                     setTimeout(async () => {
                         await sendWhatsAppMessage(client, from, replyToSend);
 
@@ -243,7 +237,6 @@ router.post("/", async (req, res) => {
                     }, BOT_TYPING_DELAY);
 
                     session.currentStep += 1;
-                    // Update time again inside timeout usually, but here fine for flow
                     session.lastActive = Date.now(); 
                     await session.save();
                 } else {
@@ -259,7 +252,7 @@ router.post("/", async (req, res) => {
   }
 });
 
-// Helper: Send Message (FIXED FOR VIDEO & AUDIO PLAYBACK)
+// Helper: Send Message (🔥 100% FIXED FOR AUDIO/VIDEO & CASE INSENSITIVE)
 const sendWhatsAppMessage = async (client, to, replyStep) => {
   try {
     const url = `https://graph.facebook.com/v17.0/${client.whatsappConfig.phoneNumberId}/messages`;
@@ -267,39 +260,42 @@ const sendWhatsAppMessage = async (client, to, replyStep) => {
 
     let body = { messaging_product: "whatsapp", recipient_type: "individual", to: to };
 
-    if (replyStep.media && replyStep.media !== "") {
+    if (replyStep.media && replyStep.media.trim() !== "") {
       let type = replyStep.mediaType || "image";
-      
-      // Safety Check
-      if (replyStep.media.includes("/video/")) {
-          type = "video";
-      } else if (replyStep.media.includes("/audio/") || replyStep.media.endsWith(".mp3") || replyStep.media.endsWith(".wav")) {
-          type = "audio";
-      } else if (replyStep.media.endsWith(".pdf") || replyStep.media.includes("/raw/")) {
-          type = "document";
-      }
+      let mediaLink = replyStep.media.trim();
+
+      // Auto-detect type if generic
+      if (mediaLink.includes("/video/")) type = "video";
+      else if (mediaLink.includes("/audio/") || mediaLink.match(/\.(mp3|wav|ogg)$/i)) type = "audio";
+      else if (mediaLink.match(/\.(pdf|doc|docx|ppt)$/i) || mediaLink.includes("/raw/")) type = "document";
 
       body.type = type;
+
+      // 🔥 FIX 1: Audio (.mp3) Handling (Case Insensitive)
+      if (type === "audio") {
+          // Check if extension exists (ignoring case like .MP3)
+          if (!mediaLink.toLowerCase().endsWith(".mp3") && !mediaLink.toLowerCase().endsWith(".wav")) {
+              mediaLink = mediaLink + ".mp3"; // Force extension for Cloudinary to serve correct header
+          }
+          body.audio = { link: mediaLink }; // Audio cannot have captions
+      }
       
-      // --- VIDEO ---
-      if (type === "video") {
-          let videoUrl = replyStep.media;
-          if (!videoUrl.endsWith(".mp4")) { videoUrl = videoUrl + ".mp4"; }
-          body.video = { link: videoUrl, caption: replyStep.text || "" };
-      } 
-      // --- AUDIO (New Fix) ---
-      else if (type === "audio") {
-          let audioUrl = replyStep.media;
-          if (!audioUrl.endsWith(".mp3")) { audioUrl = audioUrl + ".mp3"; }
-          body.audio = { link: audioUrl }; // Audio walata caption danna ba
+      // 🔥 FIX 2: Video (.mp4) Handling
+      else if (type === "video") {
+          if (!mediaLink.toLowerCase().endsWith(".mp4")) {
+              mediaLink = mediaLink + ".mp4";
+          }
+          body.video = { link: mediaLink, caption: replyStep.text || "" };
       }
-      // --- DOC ---
+      
+      // Documents
       else if (type === "document") {
-          body.document = { link: replyStep.media, caption: replyStep.text || "", filename: replyStep.fileName || "File.pdf" };
+          body.document = { link: mediaLink, caption: replyStep.text || "", filename: replyStep.fileName || "File.pdf" };
       }
-      // --- IMAGE ---
+      
+      // Images
       else {
-          body.image = { link: replyStep.media, caption: replyStep.text || "" };
+          body.image = { link: mediaLink, caption: replyStep.text || "" };
       }
 
     } else {
