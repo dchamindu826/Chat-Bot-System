@@ -29,12 +29,13 @@ router.get("/contacts", verifyToken, async (req, res) => {
   }
 });
 
-// 2. UPDATE CONTACT (General Update)
+// 🔥 2. UPDATE CONTACT (Fixed for Campaign Dashboard)
 router.put("/contact/:id", verifyToken, async (req, res) => {
     try {
+        // Frontend eken ena hama deyakma update karanawa (Phase, Status, Remarks)
         const updatedContact = await Contact.findByIdAndUpdate(
             req.params.id,
-            { $set: req.body },
+            { $set: req.body }, 
             { new: true }
         );
         res.status(200).json(updatedContact);
@@ -63,16 +64,10 @@ router.get("/contact/:id", verifyToken, async (req, res) => {
     }
 });
 
-// 🔥🔥🔥 5. UPDATE CALL STATUS, REMARKS & ATTEMPTS (FIXED) 🔥🔥🔥
+// 5. UPDATE CALL STATUS (Legacy Route - if needed)
 router.put("/update-status/:id", verifyToken, async (req, res) => {
     try {
-        // දැන් අපි Frontend එකෙන් එවන ඔක්කොම කෑලි 4 මෙතනට ගන්නවා
-        const { callStatus, remarks, attemptMethod, attemptCount } = req.body;
-
-        // Validation (Call Status නැත්නම් Update කරන්න බෑ)
-        if (!callStatus) {
-            return res.status(400).json({ message: "Call Status is required" });
-        }
+        const { callStatus, remarks, attemptMethod, attemptCount, phase } = req.body;
 
         const updatedContact = await Contact.findByIdAndUpdate(
             req.params.id,
@@ -80,10 +75,9 @@ router.put("/update-status/:id", verifyToken, async (req, res) => {
                 $set: { 
                     callStatus: callStatus,
                     remarks: remarks || "",
-                    
-                    // 🔥 ME DEKA THAMAI ALUTHEN EKATHU KARE:
                     attemptMethod: attemptMethod || "", 
-                    attemptCount: attemptCount || "0"
+                    attemptCount: attemptCount || "0",
+                    phase: phase || 1 // Support Phase here too
                 } 
             },
             { new: true }

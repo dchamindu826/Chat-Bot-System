@@ -6,6 +6,9 @@ const ContactSchema = new mongoose.Schema({
   ownerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
 
+  // 🔥 NEW: Campaign Phase Logic (01, 02, 03)
+  phase: { type: Number, default: 1 }, 
+
   // Call Report Data
   callStatus: { 
     type: String, 
@@ -13,11 +16,11 @@ const ContactSchema = new mongoose.Schema({
     default: 'Pending' 
   },
   
-  // 🔥 NEW: Unread Messages Count (UI එකේ රතු පාටින් පෙන්වන්න)
+  // UI එකේ රතු පාටින් පෙන්වන්න
   unreadCount: { type: Number, default: 0 }, 
 
   // Campaign Data
-  attemptMethod: { type: String, default: "" }, 
+  attemptMethod: { type: String, default: "-" }, 
   attemptCount: { type: String, default: "0" },
   remarks: { type: String, default: "" }, 
 
