@@ -88,8 +88,7 @@ router.post("/", async (req, res) => {
         for (const change of entry.changes) {
           const value = change.value;
 
-          // 🔥🔥🔥 START: NEW CODE FOR STATUS LOGGING 🔥🔥🔥
-          // Broadcast එක Failed ද කියලා බලන්න මේ කොටස දැම්මා
+          // 🔥 Status Updates Logging
           if (value.statuses && value.statuses.length > 0) {
              const statusObj = value.statuses[0];
              const status = statusObj.status;
@@ -98,12 +97,10 @@ router.post("/", async (req, res) => {
              console.log(`📉 Status Update for ${phone}: ${status}`);
              
              if (status === "failed") {
-                 // මෙන්න මේ Error එක තමයි අපිට ඕන Broadcast එක ෆේල් වෙන්න හේතුව හොයන්න
                  console.error("❌ Delivery Failed Reason:", JSON.stringify(statusObj.errors, null, 2));
              }
-             continue; // Status update එකක් නම් මැසේජ් එකක් විදියට process කරන්න එපා
+             continue; 
           }
-          // 🔥🔥🔥 END: NEW CODE 🔥🔥🔥
 
           if (value.messages && value.messages.length > 0) {
             const phone_number_id = value.metadata.phone_number_id;
@@ -189,7 +186,7 @@ router.post("/", async (req, res) => {
             });
 
             // ---------------------------------------------------------
-            // PART D: BOT LOGIC (UPDATED WITH AUTO RESET)
+            // PART D: BOT LOGIC
             // ---------------------------------------------------------
             const botConfig = await BotConfig.findOne({ ownerId: client._id });
 
@@ -200,7 +197,7 @@ router.post("/", async (req, res) => {
                     session = new ChatSession({ userId: client._id, phoneNumber: from, currentStep: 0, lastActive: Date.now() });
                 }
 
-                // 🔥 1. CHECK TIME GAP (AUTO RESET)
+                // 1. CHECK TIME GAP
                 const currentTime = Date.now();
                 const lastActiveTime = new Date(session.lastActive).getTime();
                 const timeDiff = currentTime - lastActiveTime;
@@ -234,7 +231,6 @@ router.post("/", async (req, res) => {
                     session.lastActive = Date.now();
                     await session.save();
                 } else {
-                    // 🔥 Update lastActive even if bot finished, so timeout works correctly next time
                     session.lastActive = Date.now();
                     await session.save();
                     console.log(`🚫 STOPPED: All steps finished for ${from}.`);
@@ -249,7 +245,7 @@ router.post("/", async (req, res) => {
   }
 });
 
-// Helper: Send Message
+// Helper: Send Message (🔥 FIXED FOR VIDEO PLAYBACK)
 const sendWhatsAppMessage = async (client, to, replyStep) => {
   try {
     const url = `https://graph.facebook.com/v17.0/${client.whatsappConfig.phoneNumberId}/messages`;
@@ -258,25 +254,63 @@ const sendWhatsAppMessage = async (client, to, replyStep) => {
     let body = { messaging_product: "whatsapp", recipient_type: "individual", to: to };
 
     if (replyStep.media && replyStep.media !== "") {
-      const type = replyStep.mediaType || "image";
+      // Default type set karamu
+      let type = replyStep.mediaType || "image";
+      
+      // Safety Check: Cloudinary URL eken type eka hariyatama ganna (Frontend eken waradunoth)
+      if (replyStep.media.includes("/video/")) {
+          type = "video";
+      } else if (replyStep.media.endsWith(".pdf") || replyStep.media.includes("/raw/")) {
+          type = "document";
+      }
+
       body.type = type;
       
-      body[type] = {
-        link: replyStep.media,
-        caption: replyStep.text || ""
-      };
+      // --- VIDEO HANDLING (The Fix) ---
+      if (type === "video") {
+          let videoUrl = replyStep.media;
+          
+          // Cloudinary Video URL ekata .mp4 kalla balen danna one play wenna
+          if (!videoUrl.endsWith(".mp4")) {
+              videoUrl = videoUrl + ".mp4"; 
+          }
 
-      if (type === "document" && replyStep.fileName) {
-         body[type].filename = replyStep.fileName;
+          body.video = {
+            link: videoUrl,
+            caption: replyStep.text || ""
+          };
+      } 
+      // --- AUDIO HANDLING ---
+      else if (type === "audio") {
+          body.audio = { link: replyStep.media };
       }
+      // --- DOCUMENT HANDLING ---
+      else if (type === "document") {
+          body.document = {
+            link: replyStep.media,
+            caption: replyStep.text || "",
+            filename: replyStep.fileName || "File.pdf"
+          };
+      }
+      // --- IMAGE HANDLING ---
+      else {
+          body.image = {
+            link: replyStep.media,
+            caption: replyStep.text || ""
+          };
+      }
+
     } else {
+      // Text Message
       body.type = "text";
       body.text = { body: replyStep.text };
     }
 
     await axios.post(url, body, { headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" } });
+    console.log(`✅ Message Sent to ${to} (Type: ${body.type})`);
+
   } catch (error) {
-    console.error("❌ Bot Send Failed:", error.message);
+    console.error("❌ Bot Send Failed:", error.response ? error.response.data : error.message);
   }
 };
 
