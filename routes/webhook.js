@@ -245,7 +245,7 @@ router.post("/", async (req, res) => {
   }
 });
 
-// Helper: Send Message (🔥 FIXED FOR VIDEO PLAYBACK)
+// Helper: Send Message (🔥 FIXED FOR VIDEO & AUDIO PLAYBACK)
 const sendWhatsAppMessage = async (client, to, replyStep) => {
   try {
     const url = `https://graph.facebook.com/v17.0/${client.whatsappConfig.phoneNumberId}/messages`;
@@ -257,32 +257,35 @@ const sendWhatsAppMessage = async (client, to, replyStep) => {
       // Default type set karamu
       let type = replyStep.mediaType || "image";
       
-      // Safety Check: Cloudinary URL eken type eka hariyatama ganna (Frontend eken waradunoth)
+      // Safety Check: Cloudinary URL eken type eka hariyatama ganna
       if (replyStep.media.includes("/video/")) {
           type = "video";
+      } else if (replyStep.media.includes("/audio/") || replyStep.media.endsWith(".mp3") || replyStep.media.endsWith(".wav")) {
+          type = "audio";
       } else if (replyStep.media.endsWith(".pdf") || replyStep.media.includes("/raw/")) {
           type = "document";
       }
 
       body.type = type;
       
-      // --- VIDEO HANDLING (The Fix) ---
+      // --- VIDEO HANDLING ---
       if (type === "video") {
           let videoUrl = replyStep.media;
-          
           // Cloudinary Video URL ekata .mp4 kalla balen danna one play wenna
           if (!videoUrl.endsWith(".mp4")) {
               videoUrl = videoUrl + ".mp4"; 
           }
-
-          body.video = {
-            link: videoUrl,
-            caption: replyStep.text || ""
-          };
+          body.video = { link: videoUrl, caption: replyStep.text || "" };
       } 
-      // --- AUDIO HANDLING ---
+      // --- AUDIO HANDLING (New Fix) ---
       else if (type === "audio") {
-          body.audio = { link: replyStep.media };
+          let audioUrl = replyStep.media;
+          // Cloudinary Audio URL ekata .mp3 danna
+          if (!audioUrl.endsWith(".mp3")) {
+              audioUrl = audioUrl + ".mp3"; 
+          }
+          // Audio walata caption danna ba whatsapp wala
+          body.audio = { link: audioUrl };
       }
       // --- DOCUMENT HANDLING ---
       else if (type === "document") {
