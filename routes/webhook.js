@@ -10,21 +10,23 @@ const ChatSession = require("../models/ChatSession");
 
 // 🔥 CONFIGURATIONS
 const SESSION_TIMEOUT = 3 * 24 * 60 * 60 * 1000; 
-const MESSAGE_COOLDOWN = 1000; 
-const BOT_TYPING_DELAY = 1500; 
+const MESSAGE_COOLDOWN = 0; // Speed Mode (No Cooldown)
+// const BOT_TYPING_DELAY = 0; // Speed Mode (No Delay)
 
 // DB Connection
+let isConnected = false;
 const connectDB = async () => {
+  if (isConnected) return;
   try {
-    if (mongoose.connection.readyState === 1) return;
     await mongoose.connect(process.env.MONGO_URL || process.env.MONGO_URI);
-    console.log("✅ MongoDB Re-Connected inside Webhook");
+    isConnected = true;
+    console.log("✅ MongoDB Connected");
   } catch (error) {
-    console.error("❌ DB Connection Error:", error);
+    console.error("❌ DB Error:", error);
   }
 };
 
-// Cloudinary Media Processor
+// Cloudinary Uploader
 const processMedia = async (mediaId, accessToken) => {
     try {
         const urlRes = await axios.get(`https://graph.facebook.com/v17.0/${mediaId}`, { headers: { Authorization: `Bearer ${accessToken}` } });
@@ -33,7 +35,6 @@ const processMedia = async (mediaId, accessToken) => {
         formData.append('file', Buffer.from(mediaRes.data), { filename: 'media_file' }); 
         formData.append('upload_preset', 'Chat Bot System'); 
         formData.append('cloud_name', 'dyixoaldi'); 
-        
         const uploadRes = await axios.post(`https://api.cloudinary.com/v1_1/dyixoaldi/auto/upload`, formData, { headers: { ...formData.getHeaders() } });
         return uploadRes.data.secure_url; 
     } catch (error) { return null; }
@@ -50,9 +51,7 @@ router.get("/", (req, res) => {
 });
 
 // 2. Ping
-router.get("/ping", (req, res) => {
-    res.status(200).send("Pong!");
-});
+router.get("/ping", (req, res) => { res.status(200).send("Pong!"); });
 
 // 3. Message Handling
 router.post("/", async (req, res) => {
@@ -64,25 +63,18 @@ router.post("/", async (req, res) => {
       for (const entry of body.entry) {
         for (const change of entry.changes) {
           const value = change.value;
-          
-          if (value.statuses && value.statuses.length > 0) {
-             const statusObj = value.statuses[0];
-             if (statusObj.status === "failed") {
-                 console.error("❌ Delivery Failed:", JSON.stringify(statusObj.errors || statusObj, null, 2));
-             }
-             continue; 
-          }
+          if (value.statuses) continue; 
 
           if (value.messages && value.messages.length > 0) {
-            const phone_number_id = value.metadata.phone_number_id;
             const msgObj = value.messages[0];
             const from = msgObj.from;
             const msgType = msgObj.type; 
+            const phone_number_id = value.metadata.phone_number_id;
 
             const client = await User.findOne({ "whatsappConfig.phoneNumberId": phone_number_id });
             if (!client) continue; 
 
-            // Save Message
+            // Save Incoming Message
             let msgBody = "Media File";
             let mediaUrl = null;
             if (msgType === "text") msgBody = msgObj.text.body;
@@ -107,26 +99,14 @@ router.post("/", async (req, res) => {
                 let session = await ChatSession.findOne({ userId: client._id, phoneNumber: from });
                 if (!session) session = new ChatSession({ userId: client._id, phoneNumber: from, currentStep: 0, lastActive: Date.now() });
 
-                const timeDiff = Date.now() - new Date(session.lastActive).getTime();
-                
-                if (timeDiff > SESSION_TIMEOUT) session.currentStep = 0; 
-                
-                // Burst Protection
-                if (timeDiff < MESSAGE_COOLDOWN && session.currentStep > 0) {
-                    console.log(`🚦 Burst Protection: Ignoring rapid message from ${from}`);
-                    continue; 
-                }
-
+                if ((Date.now() - new Date(session.lastActive).getTime()) > SESSION_TIMEOUT) session.currentStep = 0; 
                 if ((msgObj.text?.body || "").toLowerCase().match(/hi|start|menu/)) session.currentStep = 0;
 
-                // Send Reply
                 if (session.currentStep < botConfig.replies.length) {
                     const reply = botConfig.replies[session.currentStep];
                     
-                    setTimeout(async () => {
-                        await sendWhatsAppMessage(client, from, reply);
-                        await Message.create({ contactId: contact._id, text: reply.text || "Bot Reply", sender: "me", ownerId: client._id, isBotReply: true });
-                    }, BOT_TYPING_DELAY);
+                    await sendWhatsAppMessage(client, from, reply);
+                    await Message.create({ contactId: contact._id, text: reply.text || "Bot Reply", sender: "me", ownerId: client._id, isBotReply: true });
 
                     session.currentStep += 1;
                     session.lastActive = Date.now();
@@ -143,20 +123,20 @@ router.post("/", async (req, res) => {
   } catch (err) { console.error("Webhook Error:", err.message); }
 });
 
-// 🔥 Helper: Send Message (CORRECTED LOGIC FOR AUDIO VS VIDEO)
+// 🔥 Helper: Send Message (AUTO-SEND TEXT IF AUDIO HAS CAPTION)
 const sendWhatsAppMessage = async (client, to, replyStep) => {
   try {
     const url = `https://graph.facebook.com/v17.0/${client.whatsappConfig.phoneNumberId}/messages`;
     const token = client.whatsappConfig.accessToken;
+    const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+    
     let body = { messaging_product: "whatsapp", recipient_type: "individual", to: to };
 
     if (replyStep.media && replyStep.media.trim() !== "") {
-      
-      // 1. TRUST THE FRONTEND TYPE FIRST (This fixes the Audio/Video confusion)
-      let type = replyStep.mediaType || "image"; 
+      let type = replyStep.mediaType || "image";
       let mediaLink = replyStep.media.trim();
 
-      // 2. Only guess if generic 'file' or undefined
+      // Auto-detect type
       if (!type || type === 'file') {
           if (mediaLink.match(/\.(mp3|wav|ogg)$/i)) type = "audio";
           else if (mediaLink.match(/\.(mp4|mov|avi)$/i)) type = "video";
@@ -165,43 +145,49 @@ const sendWhatsAppMessage = async (client, to, replyStep) => {
 
       body.type = type;
 
-      // --- AUDIO HANDLING ---
       if (type === "audio") {
-          // Check extension case-insensitively
-          if (!mediaLink.toLowerCase().endsWith(".mp3")) {
-              mediaLink = mediaLink + ".mp3"; // WhatsApp needs this to play inline
+          if (!mediaLink.toLowerCase().endsWith(".mp3")) mediaLink += ".mp3";
+          body.audio = { link: mediaLink };
+          
+          // 🔥 SPECIAL FIX: Send Audio First
+          await axios.post(url, body, { headers });
+          console.log(`✅ Audio Sent to ${to}`);
+
+          // 🔥 THEN Check if Text exists and send as separate message
+          if (replyStep.text && replyStep.text.trim() !== "") {
+              const textBody = { 
+                  messaging_product: "whatsapp", 
+                  recipient_type: "individual", 
+                  to: to, 
+                  type: "text", 
+                  text: { body: replyStep.text } 
+              };
+              await axios.post(url, textBody, { headers });
+              console.log(`✅ Audio Caption (Separate Text) Sent to ${to}`);
           }
-          body.audio = { link: mediaLink }; // No Caption
+          return; // Stop here as we handled both
       }
-      
-      // --- VIDEO HANDLING ---
       else if (type === "video") {
-          if (!mediaLink.toLowerCase().endsWith(".mp4")) {
-              mediaLink = mediaLink + ".mp4";
-          }
+          if (!mediaLink.toLowerCase().endsWith(".mp4")) mediaLink += ".mp4";
           body.video = { link: mediaLink, caption: replyStep.text || "" };
       }
-      
-      // --- DOCUMENTS ---
       else if (type === "document") {
           body.document = { link: mediaLink, caption: replyStep.text || "", filename: replyStep.fileName || "File.pdf" };
       }
-      
-      // --- IMAGES ---
       else {
           body.image = { link: mediaLink, caption: replyStep.text || "" };
       }
-
     } else {
       body.type = "text";
       body.text = { body: replyStep.text };
     }
 
-    await axios.post(url, body, { headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" } });
+    // Send Normal Message (Video/Image/Doc/Text)
+    await axios.post(url, body, { headers });
     console.log(`✅ Message Sent to ${to} (Type: ${body.type})`);
 
-  } catch (error) {
-    console.error("❌ Bot Send Failed:", error.response ? error.response.data : error.message);
+  } catch (error) { 
+      console.error("❌ Bot Send Failed:", error.response ? error.response.data : error.message); 
   }
 };
 
