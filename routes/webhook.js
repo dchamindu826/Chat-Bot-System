@@ -8,8 +8,10 @@ const Message = require("../models/Message");
 const BotConfig = require("../models/BotConfig");
 const ChatSession = require("../models/ChatSession");
 
-// 🔥 NEW: Session Timeout Config (3 Days = 72 Hours)
-const SESSION_TIMEOUT = 3 * 24 * 60 * 60 * 1000; 
+// 🔥 CONFIGURATIONS
+const SESSION_TIMEOUT = 3 * 24 * 60 * 60 * 1000; // 3 Days
+const MESSAGE_COOLDOWN = 1000; // 🔥 1 Second Cooldown (Burst Messages නවත්වන්න)
+const BOT_TYPING_DELAY = 2500; // 🔥 2.5 Seconds Waiting Time (Bot හිතලා යවනවා වගේ පේන්න)
 
 // DB Connection
 const connectDB = async () => {
@@ -75,6 +77,12 @@ router.get("/", (req, res) => {
   }
 });
 
+// 🔥 1.1 CRON JOB PING ROUTE (මෙන්න මේක තමයි Cron Job එකට දෙන Link එක)
+router.get("/ping", (req, res) => {
+    console.log("🔔 Keep-Alive Ping Received - Preventing Cold Boot");
+    res.status(200).send("Pong! Server is Awake 🚀");
+});
+
 // 2. MESSAGE HANDLING ROUTE
 router.post("/", async (req, res) => {
   res.status(200).send("EVENT_RECEIVED");
@@ -116,7 +124,7 @@ router.post("/", async (req, res) => {
             }
 
             // ---------------------------------------------------------
-            // PART A: MEDIA HANDLING (CLOUD UPLOAD)
+            // PART A: MEDIA HANDLING
             // ---------------------------------------------------------
             let msgBody = "Media File";
             let mediaUrl = null;
@@ -125,16 +133,12 @@ router.post("/", async (req, res) => {
                 msgBody = msgObj.text.body;
             } 
             else if (["image", "video", "audio", "document", "voice", "sticker"].includes(msgType)) {
-                
                 const mediaObj = msgObj[msgType];
                 const mediaId = mediaObj?.id;
                 const caption = mediaObj?.caption || "";
-                
                 msgBody = caption || `📷 ${msgType.charAt(0).toUpperCase() + msgType.slice(1)} Received`;
 
-                // 🔥 Process Media: FB -> Cloudinary
                 if (mediaId) {
-                    console.log(`⏳ Processing ${msgType}...`);
                     mediaUrl = await processMedia(mediaId, client.whatsappConfig.accessToken);
                 }
             }
@@ -166,11 +170,7 @@ router.post("/", async (req, res) => {
             contact.messageCount = currentMsgCount;
             contact.priority = newPriority;
             contact.unreadCount = (contact.unreadCount || 0) + 1;
-            
-            if (contact.assignedTo) {
-                contact.callStatus = "Pending"; 
-            }
-            
+            if (contact.assignedTo) contact.callStatus = "Pending"; 
             await contact.save();
 
             // ---------------------------------------------------------
@@ -182,11 +182,11 @@ router.post("/", async (req, res) => {
               sender: "customer",
               ownerId: client._id,
               type: msgType === 'voice' ? 'audio' : msgType, 
-              mediaUrl: mediaUrl // 🔥 Save Public Cloudinary Link
+              mediaUrl: mediaUrl 
             });
 
             // ---------------------------------------------------------
-            // PART D: BOT LOGIC
+            // PART D: BOT LOGIC (WITH DELAY & BURST HANDLING)
             // ---------------------------------------------------------
             const botConfig = await BotConfig.findOne({ ownerId: client._id });
 
@@ -197,26 +197,43 @@ router.post("/", async (req, res) => {
                     session = new ChatSession({ userId: client._id, phoneNumber: from, currentStep: 0, lastActive: Date.now() });
                 }
 
-                // 1. CHECK TIME GAP
                 const currentTime = Date.now();
                 const lastActiveTime = new Date(session.lastActive).getTime();
                 const timeDiff = currentTime - lastActiveTime;
 
+                // 1. TIMEOUT RESET
                 if (timeDiff > SESSION_TIMEOUT) {
                     console.log(`⏳ Session Timeout for ${from}. Resetting Bot.`);
                     session.currentStep = 0; 
                 }
 
-                // 2. CHECK KEYWORD RESET
+                // 🔥 2. SPAM PROTECTION (BURST HANDLING)
+                // client එක දිගට මැසේජ් 3ක් එව්වොත්, පළවෙනි එක අරගෙන අනිත් ඒවා Ignore කරනවා.
+                // නැත්නම් Bot එක දිගට reply 3ක් යවනවා (පියවර පනිනවා).
+                if (timeDiff < MESSAGE_COOLDOWN && session.currentStep > 0) {
+                    console.log(`🚦 Burst Protection: Ignoring rapid message from ${from}`);
+                    continue; 
+                }
+
+                // 🔥 3. LOCK SESSION (Prevent parallel triggers)
+                session.lastActive = Date.now(); 
+                await session.save();
+
+                // 4. CHECK KEYWORD RESET
                 const lowerMsg = (msgObj.text?.body || "").toLowerCase();
                 if (lowerMsg.includes("hi") || lowerMsg.includes("start") || lowerMsg.includes("menu")) {
                     console.log(`🔄 RESET TRIGGERED by keyword: "${msgBody}"`);
                     session.currentStep = 0; 
                 }
 
-                // 3. SEND REPLY
+                // 5. SEND REPLY (WITH DELAY)
                 if (session.currentStep < botConfig.replies.length) {
                     const replyToSend = botConfig.replies[session.currentStep];
+                    
+                    // 🔥 ARTIFICIAL DELAY (Typing Effect)
+                    // මේකෙන් තමයි Bot එක මැසේජ් එකක් යවන්න කලින් තත්පර 2.5ක් ඉන්නේ
+                    await new Promise(resolve => setTimeout(resolve, BOT_TYPING_DELAY));
+
                     await sendWhatsAppMessage(client, from, replyToSend);
 
                     await Message.create({
@@ -228,11 +245,9 @@ router.post("/", async (req, res) => {
                     });
 
                     session.currentStep += 1;
-                    session.lastActive = Date.now();
+                    session.lastActive = Date.now(); // Update time again after delay
                     await session.save();
                 } else {
-                    session.lastActive = Date.now();
-                    await session.save();
                     console.log(`🚫 STOPPED: All steps finished for ${from}.`);
                 }
             }
@@ -245,7 +260,7 @@ router.post("/", async (req, res) => {
   }
 });
 
-// Helper: Send Message (🔥 FIXED FOR VIDEO & AUDIO PLAYBACK)
+// Helper: Send Message (FIXED FOR VIDEO & AUDIO PLAYBACK)
 const sendWhatsAppMessage = async (client, to, replyStep) => {
   try {
     const url = `https://graph.facebook.com/v17.0/${client.whatsappConfig.phoneNumberId}/messages`;
@@ -254,10 +269,9 @@ const sendWhatsAppMessage = async (client, to, replyStep) => {
     let body = { messaging_product: "whatsapp", recipient_type: "individual", to: to };
 
     if (replyStep.media && replyStep.media !== "") {
-      // Default type set karamu
       let type = replyStep.mediaType || "image";
       
-      // Safety Check: Cloudinary URL eken type eka hariyatama ganna
+      // Safety Check
       if (replyStep.media.includes("/video/")) {
           type = "video";
       } else if (replyStep.media.includes("/audio/") || replyStep.media.endsWith(".mp3") || replyStep.media.endsWith(".wav")) {
@@ -268,43 +282,28 @@ const sendWhatsAppMessage = async (client, to, replyStep) => {
 
       body.type = type;
       
-      // --- VIDEO HANDLING ---
+      // --- VIDEO ---
       if (type === "video") {
           let videoUrl = replyStep.media;
-          // Cloudinary Video URL ekata .mp4 kalla balen danna one play wenna
-          if (!videoUrl.endsWith(".mp4")) {
-              videoUrl = videoUrl + ".mp4"; 
-          }
+          if (!videoUrl.endsWith(".mp4")) { videoUrl = videoUrl + ".mp4"; }
           body.video = { link: videoUrl, caption: replyStep.text || "" };
       } 
-      // --- AUDIO HANDLING (New Fix) ---
+      // --- AUDIO ---
       else if (type === "audio") {
           let audioUrl = replyStep.media;
-          // Cloudinary Audio URL ekata .mp3 danna
-          if (!audioUrl.endsWith(".mp3")) {
-              audioUrl = audioUrl + ".mp3"; 
-          }
-          // Audio walata caption danna ba whatsapp wala
-          body.audio = { link: audioUrl };
+          if (!audioUrl.endsWith(".mp3")) { audioUrl = audioUrl + ".mp3"; }
+          body.audio = { link: audioUrl }; // No Caption
       }
-      // --- DOCUMENT HANDLING ---
+      // --- DOC ---
       else if (type === "document") {
-          body.document = {
-            link: replyStep.media,
-            caption: replyStep.text || "",
-            filename: replyStep.fileName || "File.pdf"
-          };
+          body.document = { link: replyStep.media, caption: replyStep.text || "", filename: replyStep.fileName || "File.pdf" };
       }
-      // --- IMAGE HANDLING ---
+      // --- IMAGE ---
       else {
-          body.image = {
-            link: replyStep.media,
-            caption: replyStep.text || ""
-          };
+          body.image = { link: replyStep.media, caption: replyStep.text || "" };
       }
 
     } else {
-      // Text Message
       body.type = "text";
       body.text = { body: replyStep.text };
     }
