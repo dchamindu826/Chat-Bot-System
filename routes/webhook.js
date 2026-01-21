@@ -131,7 +131,7 @@ router.post("/", async (req, res) => {
   } catch (err) { console.error("Webhook Error:", err.message); }
 });
 
-// 🔥 Helper: Send Message (AUTO-SEND TEXT IF AUDIO HAS CAPTION)
+// 🔥 Helper: Send Message (DEBUG VERSION)
 const sendWhatsAppMessage = async (client, to, replyStep) => {
   try {
     const url = `https://graph.facebook.com/v17.0/${client.whatsappConfig.phoneNumberId}/messages`;
@@ -154,33 +154,28 @@ const sendWhatsAppMessage = async (client, to, replyStep) => {
       body.type = type;
 
       if (type === "audio") {
-          // 🔥 Only append extension if not present and NO query params
           if (!mediaLink.toLowerCase().endsWith(".mp3") && !mediaLink.includes("?")) mediaLink += ".mp3";
-          
           body.audio = { link: mediaLink };
           
-          // 🔥 SPECIAL FIX: Send Audio First
           await axios.post(url, body, { headers });
-          console.log(`✅ Audio Sent to ${to}`);
-
-          // 🔥 THEN Check if Text exists and send as separate message
+          
           if (replyStep.text && replyStep.text.trim() !== "") {
               const textBody = { 
-                  messaging_product: "whatsapp", 
-                  recipient_type: "individual", 
-                  to: to, 
-                  type: "text", 
-                  text: { body: replyStep.text } 
+                  messaging_product: "whatsapp", recipient_type: "individual", to: to, type: "text", text: { body: replyStep.text } 
               };
               await axios.post(url, textBody, { headers });
-              console.log(`✅ Audio Caption (Separate Text) Sent to ${to}`);
           }
-          return; // Stop here as we handled both
+          return;
       }
       else if (type === "video") {
-          // 🔥 Only append extension if not present and NO query params (Prevents breaking signed URLs)
-          if (!mediaLink.toLowerCase().endsWith(".mp4") && !mediaLink.includes("?")) mediaLink += ".mp4";
+          // ⚠️ DEBUG: Link eka pennanna
+          console.log("🎥 Original Video Link:", mediaLink);
+
+          // .mp4 add karana eka nawaththala balamu (Cloudinary walata samahara vita meka awul)
+          // if (!mediaLink.toLowerCase().endsWith(".mp4") && !mediaLink.includes("?")) mediaLink += ".mp4";
           
+          console.log("🚀 Final Sending Video Link:", mediaLink);
+
           body.video = { link: mediaLink, caption: replyStep.text || "" };
       }
       else if (type === "document") {
@@ -194,12 +189,12 @@ const sendWhatsAppMessage = async (client, to, replyStep) => {
       body.text = { body: replyStep.text };
     }
 
-    // Send Normal Message (Video/Image/Doc/Text)
-    await axios.post(url, body, { headers });
-    console.log(`✅ Message Sent to ${to} (Type: ${body.type})`);
+    // Send Request
+    const res = await axios.post(url, body, { headers });
+    console.log(`✅ Message Sent to ${to} | ID: ${res.data.messages[0].id}`);
 
   } catch (error) { 
-      console.error("❌ Bot Send Failed:", error.response ? error.response.data : error.message); 
+      console.error("❌ Bot Send Failed Details:", error.response ? JSON.stringify(error.response.data) : error.message); 
   }
 };
 
