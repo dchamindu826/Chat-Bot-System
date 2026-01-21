@@ -169,16 +169,23 @@ const sendWhatsAppMessage = async (client, to, replyStep) => {
       }
       else if (type === "video") {
           
-          // 🔥 CLOUDINARY AUDIO FIX (Auto Convert to AAC)
-          if (mediaLink.includes("res.cloudinary.com") && !mediaLink.includes("ac_aac")) {
-              // Cloudinary URL එක මැදට 'vc_h264,ac_aac' ඔබනවා
-              mediaLink = mediaLink.replace("/upload/", "/upload/vc_h264,ac_aac/");
+          console.log("🎥 Original Video Link:", mediaLink);
+
+          // 🔥 FIXED: More Compatible Cloudinary Transformation
+          // vc_h264:baseline -> WhatsApp walata support karana hondama format eka
+          // ac_aac -> Audio fix eka
+          // br_2000k -> Bitrate eka 2MB walata limit karanawa (Load wena eka fast wenna)
+          // w_800,c_limit -> Video eka godak loku nam size eka adu karanawa
+          
+          if (mediaLink.includes("res.cloudinary.com") && !mediaLink.includes("vc_h264")) {
+              mediaLink = mediaLink.replace("/upload/", "/upload/vc_h264:baseline,ac_aac,br_2000k,w_800,c_limit/");
           }
 
-          console.log("🚀 Fixed Cloudinary Video Link:", mediaLink);
-
+          // Force .mp4 extension for WhatsApp
           if (!mediaLink.toLowerCase().endsWith(".mp4") && !mediaLink.includes("?")) mediaLink += ".mp4";
           
+          console.log("🚀 Final Sending Video Link:", mediaLink);
+
           body.video = { link: mediaLink, caption: replyStep.text || "" };
       }
       else if (type === "document") {
