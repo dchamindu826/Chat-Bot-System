@@ -1,6 +1,6 @@
 const router = require("express").Router();
 const QuickReply = require("../models/QuickReply");
-const { verifyToken } = require("./verifyToken"); // ඔයාගේ Auth Middleware එක
+const { verifyToken } = require("../verifyToken");
 
 // 1. CREATE NEW QUICK REPLY
 router.post("/add", verifyToken, async (req, res) => {
