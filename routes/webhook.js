@@ -168,14 +168,17 @@ const sendWhatsAppMessage = async (client, to, replyStep) => {
           return;
       }
       else if (type === "video") {
-          // ⚠️ DEBUG: Link eka pennanna
-          console.log("🎥 Original Video Link:", mediaLink);
-
-          // .mp4 add karana eka nawaththala balamu (Cloudinary walata samahara vita meka awul)
-          // if (!mediaLink.toLowerCase().endsWith(".mp4") && !mediaLink.includes("?")) mediaLink += ".mp4";
           
-          console.log("🚀 Final Sending Video Link:", mediaLink);
+          // 🔥 CLOUDINARY AUDIO FIX (Auto Convert to AAC)
+          if (mediaLink.includes("res.cloudinary.com") && !mediaLink.includes("ac_aac")) {
+              // Cloudinary URL එක මැදට 'vc_h264,ac_aac' ඔබනවා
+              mediaLink = mediaLink.replace("/upload/", "/upload/vc_h264,ac_aac/");
+          }
 
+          console.log("🚀 Fixed Cloudinary Video Link:", mediaLink);
+
+          if (!mediaLink.toLowerCase().endsWith(".mp4") && !mediaLink.includes("?")) mediaLink += ".mp4";
+          
           body.video = { link: mediaLink, caption: replyStep.text || "" };
       }
       else if (type === "document") {
