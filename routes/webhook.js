@@ -63,7 +63,15 @@ router.post("/", async (req, res) => {
       for (const entry of body.entry) {
         for (const change of entry.changes) {
           const value = change.value;
-          if (value.statuses) continue; 
+
+          // 🔥 UPDATED: Error Logging for Failed Messages
+          if (value.statuses) {
+             const statusObj = value.statuses[0];
+             if (statusObj.status === "failed") {
+                 console.error(`❌ WhatsApp Error for ${statusObj.recipient_id}:`, JSON.stringify(statusObj.errors));
+             }
+             continue; 
+          }
 
           if (value.messages && value.messages.length > 0) {
             const msgObj = value.messages[0];
@@ -146,7 +154,9 @@ const sendWhatsAppMessage = async (client, to, replyStep) => {
       body.type = type;
 
       if (type === "audio") {
-          if (!mediaLink.toLowerCase().endsWith(".mp3")) mediaLink += ".mp3";
+          // 🔥 Only append extension if not present and NO query params
+          if (!mediaLink.toLowerCase().endsWith(".mp3") && !mediaLink.includes("?")) mediaLink += ".mp3";
+          
           body.audio = { link: mediaLink };
           
           // 🔥 SPECIAL FIX: Send Audio First
@@ -168,7 +178,9 @@ const sendWhatsAppMessage = async (client, to, replyStep) => {
           return; // Stop here as we handled both
       }
       else if (type === "video") {
-          if (!mediaLink.toLowerCase().endsWith(".mp4")) mediaLink += ".mp4";
+          // 🔥 Only append extension if not present and NO query params (Prevents breaking signed URLs)
+          if (!mediaLink.toLowerCase().endsWith(".mp4") && !mediaLink.includes("?")) mediaLink += ".mp4";
+          
           body.video = { link: mediaLink, caption: replyStep.text || "" };
       }
       else if (type === "document") {
