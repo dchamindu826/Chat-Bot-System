@@ -15,6 +15,7 @@ const teamRoute = require('./routes/team');
 const crmRoute = require("./routes/crm");
 const broadcastRoute = require("./routes/broadcast"); 
 const cronRoute = require("./routes/cron"); 
+const quickReplyRoute = require("./routes/quickReplies");
 
 // 🔥 NEW IMPORT (මේ ෆයිල් එක routes ෆෝල්ඩර් එකේ තියෙන්නම ඕන)
 const templateRoute = require("./routes/templates"); 
@@ -85,6 +86,7 @@ app.use("/api/cron", cronRoute);
 
 // 🔥 NEW ROUTE (Templates)
 app.use("/api/templates", templateRoute);
+app.use("/api/quick-replies", quickReplyRoute);
 
 // 404 handler
 app.use((req, res) => {
