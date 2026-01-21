@@ -171,20 +171,15 @@ const sendWhatsAppMessage = async (client, to, replyStep) => {
           
           console.log("🎥 Original Video Link:", mediaLink);
 
-          // 🔥 FIXED: More Compatible Cloudinary Transformation
-          // vc_h264:baseline -> WhatsApp walata support karana hondama format eka
-          // ac_aac -> Audio fix eka
-          // br_2000k -> Bitrate eka 2MB walata limit karanawa (Load wena eka fast wenna)
-          // w_800,c_limit -> Video eka godak loku nam size eka adu karanawa
+          // 🔥 CLEAN VERSION: No Cloudinary Transformations
+          // Video eka api manual convert karala upload karamu.
           
-          if (mediaLink.includes("res.cloudinary.com") && !mediaLink.includes("vc_h264")) {
-              mediaLink = mediaLink.replace("/upload/", "/upload/vc_h264:baseline,ac_aac,br_2000k,w_800,c_limit/");
+          // Extension eka nethnam witharak dagannawa safety ekata
+          if (!mediaLink.toLowerCase().endsWith(".mp4") && !mediaLink.includes("?")) {
+              mediaLink += ".mp4";
           }
-
-          // Force .mp4 extension for WhatsApp
-          if (!mediaLink.toLowerCase().endsWith(".mp4") && !mediaLink.includes("?")) mediaLink += ".mp4";
           
-          console.log("🚀 Final Sending Video Link:", mediaLink);
+          console.log("🚀 Sending Direct Link:", mediaLink);
 
           body.video = { link: mediaLink, caption: replyStep.text || "" };
       }
