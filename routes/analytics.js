@@ -70,25 +70,52 @@ router.get('/logs', verifyTokenAndAdmin, async (req, res) => {
   }
 });
 
-// 3. USER DASHBOARD STATS
+// 3. USER DASHBOARD STATS (🔥 FIXED: Added Phase Filtering)
 router.get('/user-stats', verifyToken, async (req, res) => {
   try {
-    const totalCalls = await Contact.countDocuments({ ownerId: req.user.id });
+    const { phase } = req.query; // Frontend eken ewana phase eka gannawa
+    const ownerId = req.user.id;
+
+    // 🔥 Filter Object eka hadanawa
+    let filter = { ownerId: ownerId };
+    
+    // Phase eka "All" newei nam, filter ekata add karanawa
+    if (phase && phase !== 'All') {
+        filter.phase = parseInt(phase);
+    }
+
+    // Apply Filter to Counts
+    const totalCalls = await Contact.countDocuments(filter);
+    
+    // Messages usually global or owner specific, keeping it owner specific
     const totalMessages = await Message.countDocuments({ ownerId: req.user.id });
     
-    const assignedContacts = await Contact.countDocuments({ ownerId: req.user.id, assignedTo: { $ne: null } });
-    const answeredContacts = await Contact.countDocuments({ ownerId: req.user.id, callStatus: 'Answered' });
+    const assignedContacts = await Contact.countDocuments({ ...filter, assignedTo: { $ne: null } });
+    const answeredContacts = await Contact.countDocuments({ ...filter, callStatus: 'Answered' });
+    
     const responseRate = assignedContacts > 0 ? ((answeredContacts / assignedContacts) * 100).toFixed(1) : 0;
 
     res.status(200).json({ totalCalls, totalMessages, responseRate });
   } catch (err) { res.status(500).json(err); }
 });
 
-// 4. AGENT PERFORMANCE
+// 4. AGENT PERFORMANCE (🔥 FIXED: Added Phase Filtering)
 router.get('/agent-performance', verifyToken, async (req, res) => {
   try {
+    const { phase } = req.query; // Frontend eken ewana phase eka
+
+    // 🔥 Match Stage eka (Filter)
+    let matchStage = { 
+        ownerId: new mongoose.Types.ObjectId(req.user.id)
+    };
+
+    // Phase eka "All" newei nam, matchStage ekata add karanawa
+    if (phase && phase !== 'All') {
+        matchStage.phase = parseInt(phase);
+    }
+
     const stats = await Contact.aggregate([
-      { $match: { ownerId: new mongoose.Types.ObjectId(req.user.id) } },
+      { $match: matchStage }, // 🔥 Filter wenne methanin
       {
         $group: {
           _id: "$assignedTo",
