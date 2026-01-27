@@ -4,7 +4,6 @@ const Message = require('../models/Message');
 const User = require('../models/User');
 const SystemLog = require('../models/SystemLog');
 const Contact = require('../models/Contact');
-// ✅ Fix: Imports hariyata damma
 const { verifyTokenAndAdmin, verifyToken, verifyTokenAndAuthorization } = require('../verifyToken');
 
 // 1. ADMIN OVERVIEW
@@ -14,7 +13,6 @@ router.get('/overview', verifyTokenAndAdmin, async (req, res) => {
     const totalMessages = await Message.countDocuments();
     const totalErrors = await SystemLog.countDocuments({ type: 'ERROR' });
 
-    // Last 7 Days Chart Data
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
@@ -34,26 +32,14 @@ router.get('/overview', verifyTokenAndAdmin, async (req, res) => {
         const d = new Date();
         d.setDate(d.getDate() - i);
         const dateString = d.toISOString().split('T')[0];
-        
         const found = messageChart.find(item => item._id === dateString);
-        chartData.push({
-            name: dateString,
-            messages: found ? found.count : 0
-        });
+        chartData.push({ name: dateString, messages: found ? found.count : 0 });
     }
     
     chartData.sort((a, b) => new Date(a.name) - new Date(b.name));
 
-    res.status(200).json({
-      totalMessages,
-      activeClients,
-      totalErrors,
-      chartData
-    });
-
-  } catch (err) {
-    res.status(500).json(err);
-  }
+    res.status(200).json({ totalMessages, activeClients, totalErrors, chartData });
+  } catch (err) { res.status(500).json(err); }
 });
 
 // 2. ADMIN LOGS
@@ -63,67 +49,93 @@ router.get('/logs', verifyTokenAndAdmin, async (req, res) => {
       .populate('clientId', 'name businessName phone')
       .sort({ createdAt: -1 })
       .limit(100); 
-
     res.status(200).json(logs);
-  } catch (err) {
-    res.status(500).json(err);
-  }
+  } catch (err) { res.status(500).json(err); }
 });
 
-// 3. USER DASHBOARD STATS (🔥 FIXED: Added Phase Filtering)
+// 3. USER DASHBOARD STATS
 router.get('/user-stats', verifyToken, async (req, res) => {
   try {
-    const { phase } = req.query; // Frontend eken ewana phase eka gannawa
+    const { phase } = req.query;
     const ownerId = req.user.id;
-
-    // 🔥 Filter Object eka hadanawa
     let filter = { ownerId: ownerId };
     
-    // Phase eka "All" newei nam, filter ekata add karanawa
     if (phase && phase !== 'All') {
         filter.phase = parseInt(phase);
     }
 
-    // Apply Filter to Counts
     const totalCalls = await Contact.countDocuments(filter);
-    
-    // Messages usually global or owner specific, keeping it owner specific
     const totalMessages = await Message.countDocuments({ ownerId: req.user.id });
-    
     const assignedContacts = await Contact.countDocuments({ ...filter, assignedTo: { $ne: null } });
     const answeredContacts = await Contact.countDocuments({ ...filter, callStatus: 'Answered' });
     
     const responseRate = assignedContacts > 0 ? ((answeredContacts / assignedContacts) * 100).toFixed(1) : 0;
 
+    // 🔥 FIX: Sending number only (Percentage handling moved to frontend)
     res.status(200).json({ totalCalls, totalMessages, responseRate });
   } catch (err) { res.status(500).json(err); }
 });
 
-// 4. AGENT PERFORMANCE (🔥 FIXED: Added Phase Filtering)
+// 4. AGENT PERFORMANCE (🔥 FIXED: Logic Updated)
 router.get('/agent-performance', verifyToken, async (req, res) => {
   try {
-    const { phase } = req.query; // Frontend eken ewana phase eka
+    const { phase } = req.query;
+    let matchStage = { ownerId: new mongoose.Types.ObjectId(req.user.id) };
 
-    // 🔥 Match Stage eka (Filter)
-    let matchStage = { 
-        ownerId: new mongoose.Types.ObjectId(req.user.id)
-    };
-
-    // Phase eka "All" newei nam, matchStage ekata add karanawa
     if (phase && phase !== 'All') {
         matchStage.phase = parseInt(phase);
     }
 
     const stats = await Contact.aggregate([
-      { $match: matchStage }, // 🔥 Filter wenne methanin
+      { $match: matchStage },
       {
         $group: {
           _id: "$assignedTo",
           totalAllocated: { $sum: 1 },
+          
+          // Count 'Answered'
           answered: { $sum: { $cond: [{ $eq: ["$callStatus", "Answered"] }, 1, 0] } },
-          noAnswer: { $sum: { $cond: [{ $eq: ["$callStatus", "No Answer"] }, 1, 0] } },
+          
+          // 🔥 FIX: Count 'No Answer' IF status is 'No Answer' OR (Status is 'Pending' BUT Attempts > 0)
+          // මේකෙන් වෙන්නේ Phase මාරු වෙලා Pending වුනත්, කලින් කෝල් කරලා නිසා ඒක No Answer විදිහට ගණන් ගන්නවා.
+          noAnswer: { 
+            $sum: { 
+                $cond: [
+                    { 
+                        $or: [
+                            { $eq: ["$callStatus", "No Answer"] },
+                            { 
+                                $and: [
+                                    { $eq: ["$callStatus", "Pending"] },
+                                    { $gt: [{ $toInt: "$attemptCount" }, 0] } // Check if attempts > 0
+                                ] 
+                            }
+                        ] 
+                    }, 
+                    1, 
+                    0 
+                ] 
+            } 
+          },
+
+          // Count 'Reject'
           reject: { $sum: { $cond: [{ $eq: ["$callStatus", "Reject"] }, 1, 0] } },
-          pending: { $sum: { $cond: [{ $eq: ["$callStatus", "Pending"] }, 1, 0] } }
+          
+          // Count 'Pure Pending' (Attempts == 0)
+          pending: { 
+            $sum: { 
+                $cond: [
+                    { 
+                        $and: [
+                            { $eq: ["$callStatus", "Pending"] },
+                            { $eq: [{ $toInt: "$attemptCount" }, 0] } // Only count if NO attempts made
+                        ] 
+                    }, 
+                    1, 
+                    0 
+                ] 
+            } 
+          }
         }
       },
       {
@@ -134,6 +146,12 @@ router.get('/agent-performance', verifyToken, async (req, res) => {
 
     const formattedStats = stats.map(stat => {
         const responseRate = stat.totalAllocated > 0 ? ((stat.answered / stat.totalAllocated) * 100).toFixed(1) : 0;
+        
+        // Auto Calculate 'To Cover' (Assigned - Actions)
+        // දැන් No Answer එකට 'Retries' එකතු වුන නිසා, To Cover එකට එන්නේ තාම කෝල් නොකරපු ටික විතරයි.
+        const totalActioned = stat.answered + stat.noAnswer + stat.reject;
+        const toCover = stat.totalAllocated - totalActioned;
+
         return {
             id: stat._id,
             agentName: stat.agentInfo ? stat.agentInfo.name : "Unassigned Pool",
@@ -141,8 +159,8 @@ router.get('/agent-performance', verifyToken, async (req, res) => {
             answered: stat.answered,
             noAnswer: stat.noAnswer,
             reject: stat.reject,
-            responseRate: responseRate + '%',
-            toCover: stat.pending
+            responseRate: responseRate, // 🔥 FIX: Removed '%' string here
+            toCover: toCover < 0 ? 0 : toCover
         };
     });
 
