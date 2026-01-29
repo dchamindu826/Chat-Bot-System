@@ -21,7 +21,49 @@ router.get("/", verifyToken, async (req, res) => {
   }
 });
 
-// 2. CREATE TEMPLATE (🔥 FIXED: Robust Payload Construction)
+// 🔥 HELPER: Upload File to Meta & Get Handle
+const uploadToMeta = async (fileUrl, accessToken) => {
+    try {
+        // 1. Get App ID (Required for uploads)
+        const debugRes = await axios.get(`https://graph.facebook.com/v18.0/debug_token`, {
+            params: { input_token: accessToken, access_token: accessToken }
+        });
+        const appId = debugRes.data.data.app_id;
+
+        // 2. Download File from Cloudinary
+        const fileRes = await axios.get(fileUrl, { responseType: 'arraybuffer' });
+        const fileBuffer = Buffer.from(fileRes.data);
+        const fileLength = fileBuffer.length;
+        const fileType = fileRes.headers['content-type'];
+
+        // 3. Start Upload Session
+        const sessionUrl = `https://graph.facebook.com/v18.0/${appId}/uploads?file_length=${fileLength}&file_type=${fileType}`;
+        const sessionRes = await axios.post(sessionUrl, null, {
+            headers: { Authorization: `Bearer ${accessToken}` }
+        });
+        const uploadId = sessionRes.data.id;
+
+        // 4. Upload Binary Data
+        const uploadUrl = `https://graph.facebook.com/v18.0/${uploadId}`;
+        const handleRes = await axios.post(uploadUrl, fileBuffer, {
+            headers: { 
+                Authorization: `Bearer ${accessToken}`,
+                "OAuth-Token": accessToken,
+                "file_offset": 0 
+            }
+        });
+
+        // 5. Return the Handle
+        console.log("✅ Meta Upload Handle:", handleRes.data.h);
+        return handleRes.data.h;
+
+    } catch (error) {
+        console.error("❌ Meta Upload Failed:", error.response ? error.response.data : error.message);
+        return null;
+    }
+};
+
+// 2. CREATE TEMPLATE (🔥 Updated with Auto-Upload Logic)
 router.post("/create", verifyToken, async (req, res) => {
   try {
     const { name, category, language, bodyText, headerType, headerText, footerText, headerUrl } = req.body;
@@ -43,24 +85,31 @@ router.post("/create", verifyToken, async (req, res) => {
         } 
         // 2. Media Header (IMAGE, VIDEO, DOCUMENT)
         else if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType) && headerUrl) {
+            
+            // 🔥 Upload to Meta first to get the Handle
+            const fileHandle = await uploadToMeta(headerUrl, accessToken);
+            
+            if (!fileHandle) {
+                return res.status(400).json({ message: "Failed to upload media to Meta. Check file format/size." });
+            }
+
             headerComponent.example = { 
-                header_url: [headerUrl] // URL eka Array ekak widihata
+                header_handle: [fileHandle] // Now using the correct Handle!
             };
         }
 
         components.push(headerComponent);
     }
 
-    // --- B. BODY COMPONENT (🔥 Auto-Generate Examples for Variables) ---
+    // --- B. BODY COMPONENT ---
     let bodyComponent = { type: "BODY", text: bodyText };
     
-    // Check if body text has variables like {{1}}, {{2}}
+    // Check for variables {{1}}, {{2}}
     const variableCount = (bodyText.match(/{{/g) || []).length;
     if (variableCount > 0) {
-        // Example text එකක් හදනවා (උදා: "Sample 1", "Sample 2")
-        const bodyExamples = Array.from({ length: variableCount }, (_, i) => `Sample ${i + 1}`);
+        const bodyExamples = Array.from({ length: variableCount }, (_, i) => `SampleData`);
         bodyComponent.example = {
-            body_text: [bodyExamples] // Note: Double Array required for Body Examples [['Ex1', 'Ex2']]
+            body_text: [bodyExamples] 
         };
     }
     
@@ -76,7 +125,7 @@ router.post("/create", verifyToken, async (req, res) => {
       components: components
     };
 
-    console.log("🚀 Sending Template Payload:", JSON.stringify(body, null, 2)); // Debugging සදහා Log එකක්
+    console.log("🚀 Sending Template:", JSON.stringify(body, null, 2));
 
     const url = `https://graph.facebook.com/v18.0/${wabaId}/message_templates`;
     const response = await axios.post(url, body, {
