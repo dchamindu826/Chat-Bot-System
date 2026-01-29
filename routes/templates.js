@@ -21,22 +21,39 @@ router.get("/", verifyToken, async (req, res) => {
   }
 });
 
-// 2. CREATE TEMPLATE
+// 2. CREATE TEMPLATE (🔥 Updated for Media Headers)
 router.post("/create", verifyToken, async (req, res) => {
   try {
-    const { name, category, language, bodyText, headerType, headerText, footerText } = req.body;
+    // 🔥 Added 'headerUrl' to destructuring
+    const { name, category, language, bodyText, headerType, headerText, footerText, headerUrl } = req.body;
+    
     const client = await User.findById(req.user.id);
     const { wabaId, accessToken } = client.whatsappConfig;
 
     if (!wabaId) return res.status(400).json({ message: "WABA ID is missing" });
 
     let components = [];
+
+    // 🔥 Header Logic Updated
     if (headerType && headerType !== 'NONE') {
         let headerComponent = { type: "HEADER", format: headerType };
-        if (headerType === 'TEXT' && headerText) headerComponent.text = headerText;
+        
+        // 1. Text Header
+        if (headerType === 'TEXT' && headerText) {
+            headerComponent.text = headerText;
+        } 
+        // 2. Media Header (IMAGE, VIDEO, DOCUMENT) - Needs Example URL/Handle
+        else if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType) && headerUrl) {
+            headerComponent.example = { 
+                header_handle: [headerUrl] // Meta uses this link as the sample for approval
+            };
+        }
+
         components.push(headerComponent);
     }
+
     components.push({ type: "BODY", text: bodyText });
+    
     if (footerText) components.push({ type: "FOOTER", text: footerText });
 
     const body = {
@@ -53,6 +70,7 @@ router.post("/create", verifyToken, async (req, res) => {
 
     res.status(201).json({ message: "Template Submitted!", data: response.data });
   } catch (err) {
+    console.error("Meta API Error:", err.response ? err.response.data : err.message);
     res.status(500).json(err.response ? err.response.data : "Error creating template");
   }
 });
