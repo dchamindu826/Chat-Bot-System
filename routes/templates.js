@@ -21,10 +21,9 @@ router.get("/", verifyToken, async (req, res) => {
   }
 });
 
-// 2. CREATE TEMPLATE (🔥 FIXED: Media Header Logic)
+// 2. CREATE TEMPLATE (🔥 FIXED: Robust Payload Construction)
 router.post("/create", verifyToken, async (req, res) => {
   try {
-    // Frontend eken 'headerUrl' eka gannawa
     const { name, category, language, bodyText, headerType, headerText, footerText, headerUrl } = req.body;
     
     const client = await User.findById(req.user.id);
@@ -34,7 +33,7 @@ router.post("/create", verifyToken, async (req, res) => {
 
     let components = [];
 
-    // 🔥 Header Logic Updated for Cloudinary Links
+    // --- A. HEADER COMPONENT ---
     if (headerType && headerType !== 'NONE') {
         let headerComponent = { type: "HEADER", format: headerType };
         
@@ -45,18 +44,29 @@ router.post("/create", verifyToken, async (req, res) => {
         // 2. Media Header (IMAGE, VIDEO, DOCUMENT)
         else if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType) && headerUrl) {
             headerComponent.example = { 
-                // 🔥 CHANGE IS HERE: Use 'header_url' instead of 'header_handle' for Cloudinary links
-                header_url: [headerUrl] 
+                header_url: [headerUrl] // URL eka Array ekak widihata
             };
         }
 
         components.push(headerComponent);
     }
 
-    // Body Text
-    components.push({ type: "BODY", text: bodyText });
+    // --- B. BODY COMPONENT (🔥 Auto-Generate Examples for Variables) ---
+    let bodyComponent = { type: "BODY", text: bodyText };
     
-    // Footer (Optional)
+    // Check if body text has variables like {{1}}, {{2}}
+    const variableCount = (bodyText.match(/{{/g) || []).length;
+    if (variableCount > 0) {
+        // Example text එකක් හදනවා (උදා: "Sample 1", "Sample 2")
+        const bodyExamples = Array.from({ length: variableCount }, (_, i) => `Sample ${i + 1}`);
+        bodyComponent.example = {
+            body_text: [bodyExamples] // Note: Double Array required for Body Examples [['Ex1', 'Ex2']]
+        };
+    }
+    
+    components.push(bodyComponent);
+    
+    // --- C. FOOTER COMPONENT ---
     if (footerText) components.push({ type: "FOOTER", text: footerText });
 
     const body = {
@@ -66,6 +76,8 @@ router.post("/create", verifyToken, async (req, res) => {
       components: components
     };
 
+    console.log("🚀 Sending Template Payload:", JSON.stringify(body, null, 2)); // Debugging සදහා Log එකක්
+
     const url = `https://graph.facebook.com/v18.0/${wabaId}/message_templates`;
     const response = await axios.post(url, body, {
       headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" }
@@ -73,8 +85,7 @@ router.post("/create", verifyToken, async (req, res) => {
 
     res.status(201).json({ message: "Template Submitted!", data: response.data });
   } catch (err) {
-    console.error("Meta API Error:", err.response ? err.response.data : err.message);
-    // Error details frontend ekata yawamu
+    console.error("❌ Meta API Error:", err.response ? JSON.stringify(err.response.data) : err.message);
     res.status(500).json(err.response ? err.response.data : "Error creating template");
   }
 });
