@@ -21,10 +21,10 @@ router.get("/", verifyToken, async (req, res) => {
   }
 });
 
-// 2. CREATE TEMPLATE (🔥 Updated for Media Headers)
+// 2. CREATE TEMPLATE (🔥 FIXED: Media Header Logic)
 router.post("/create", verifyToken, async (req, res) => {
   try {
-    // 🔥 Added 'headerUrl' to destructuring
+    // Frontend eken 'headerUrl' eka gannawa
     const { name, category, language, bodyText, headerType, headerText, footerText, headerUrl } = req.body;
     
     const client = await User.findById(req.user.id);
@@ -34,7 +34,7 @@ router.post("/create", verifyToken, async (req, res) => {
 
     let components = [];
 
-    // 🔥 Header Logic Updated
+    // 🔥 Header Logic Updated for Cloudinary Links
     if (headerType && headerType !== 'NONE') {
         let headerComponent = { type: "HEADER", format: headerType };
         
@@ -42,18 +42,21 @@ router.post("/create", verifyToken, async (req, res) => {
         if (headerType === 'TEXT' && headerText) {
             headerComponent.text = headerText;
         } 
-        // 2. Media Header (IMAGE, VIDEO, DOCUMENT) - Needs Example URL/Handle
+        // 2. Media Header (IMAGE, VIDEO, DOCUMENT)
         else if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType) && headerUrl) {
             headerComponent.example = { 
-                header_handle: [headerUrl] // Meta uses this link as the sample for approval
+                // 🔥 CHANGE IS HERE: Use 'header_url' instead of 'header_handle' for Cloudinary links
+                header_url: [headerUrl] 
             };
         }
 
         components.push(headerComponent);
     }
 
+    // Body Text
     components.push({ type: "BODY", text: bodyText });
     
+    // Footer (Optional)
     if (footerText) components.push({ type: "FOOTER", text: footerText });
 
     const body = {
@@ -71,6 +74,7 @@ router.post("/create", verifyToken, async (req, res) => {
     res.status(201).json({ message: "Template Submitted!", data: response.data });
   } catch (err) {
     console.error("Meta API Error:", err.response ? err.response.data : err.message);
+    // Error details frontend ekata yawamu
     res.status(500).json(err.response ? err.response.data : "Error creating template");
   }
 });
