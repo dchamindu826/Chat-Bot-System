@@ -27,121 +27,123 @@ router.get("/run", async (req, res) => {
     const now = new Date();
 
     // 2. Find Pending Jobs
+    // 🔥 FIX 1: Limit to 1 job at a time to prevent server overload
     const jobs = await Broadcast.find({
       status: "pending",
       scheduledTime: { $lte: now }, 
-    });
+    }).limit(1);
 
     if (jobs.length === 0) {
         return res.status(200).json({ message: "No jobs pending" });
     }
 
-    let processedCount = 0;
+    const job = jobs[0];
 
-    for (const job of jobs) {
-      console.log(`🚀 Processing Campaign: ${job.name}`);
-      
-      const client = await User.findById(job.ownerId);
-      if (!client || !client.whatsappConfig) {
-          job.status = "failed";
-          await job.save();
-          continue;
-      }
+    // 🔥🔥 FIX 2: THE SAFETY LOCK (ඉතාම වැදගත්)
+    // ජොබ් එක ගත්ත ගමන්ම Status එක වෙනස් කරනවා. 
+    // එතකොට ඊළඟ විනාඩියේ Cron එක ආවම මේක ආයේ අල්ලන්නේ නෑ.
+    job.status = "processing";
+    await job.save();
 
-      const { phoneNumberId, accessToken } = client.whatsappConfig;
-      let success = 0;
-      let failed = 0;
+    console.log(`🚀 LOCKED & Processing Campaign: ${job.name}`);
 
-      // 3. Loop Recipients
-      for (const number of job.recipients) {
-        try {
-          const url = `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`;
-          
-          let body = {
-            messaging_product: "whatsapp",
-            recipient_type: "individual",
-            to: number,
-          };
-
-          // 🔥🔥 NEW: Handle Template Messages
-          if (job.isTemplate) {
-              body.type = "template";
-              body.template = {
-                  name: job.templateName,
-                  language: { code: job.templateLanguage },
-                  components: []
-              };
-
-              // A. Handle Header Media (If Exists)
-              if (job.mediaUrl) {
-                  const headerType = getHeaderType(job.mediaUrl); // Detect image/video/doc
-                  body.template.components.push({
-                      type: "header",
-                      parameters: [{
-                          type: headerType,
-                          [headerType]: { link: job.mediaUrl }
-                      }]
-                  });
-              }
-
-              // B. Handle Body Variables ({{1}}, {{2}}...)
-              if (job.templateVariables && job.templateVariables.length > 0) {
-                  const params = job.templateVariables.map(val => ({
-                      type: "text",
-                      text: val
-                  }));
-                  body.template.components.push({
-                      type: "body",
-                      parameters: params
-                  });
-              }
-
-          } 
-          // 🔥 Handle Custom Messages (Old Logic)
-          else {
-              body.type = job.messageType;
-
-              if (job.messageType === 'text') {
-                  body.text = { body: job.message };
-              } 
-              else if (['image', 'video', 'audio'].includes(job.messageType)) {
-                  body[job.messageType] = { link: job.mediaUrl };
-                  if (job.message && job.messageType !== 'audio') {
-                      body[job.messageType].caption = job.message;
-                  }
-              }
-              else if (job.messageType === 'document') {
-                  body.document = { 
-                      link: job.mediaUrl,
-                      filename: "Attachment.pdf",
-                      caption: job.message || ""
-                  };
-              }
-          }
-
-          // 5. Send Request
-          await axios.post(url, body, {
-            headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" }
-          });
-          
-          success++;
-          console.log(`✅ Sent to ${number}`);
-
-        } catch (err) {
-          console.error(`❌ Failed to ${number}:`, err.response ? err.response.data : err.message);
-          failed++;
-        }
-      }
-
-      // 6. Update Job Status
-      job.status = "completed";
-      job.successCount = success;
-      job.failCount = failed;
-      await job.save();
-      processedCount++;
+    const client = await User.findById(job.ownerId);
+    if (!client || !client.whatsappConfig) {
+        job.status = "failed";
+        await job.save();
+        return res.status(200).json({ message: "Client config missing" });
     }
 
-    res.status(200).json({ message: `Processed ${processedCount} campaigns` });
+    const { phoneNumberId, accessToken } = client.whatsappConfig;
+    let success = 0;
+    let failed = 0;
+
+    // 3. Loop Recipients
+    for (const number of job.recipients) {
+        try {
+            const url = `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`;
+            
+            let body = {
+                messaging_product: "whatsapp",
+                recipient_type: "individual",
+                to: number,
+            };
+
+            // --- A. Handle Template Messages ---
+            if (job.isTemplate) {
+                body.type = "template";
+                body.template = {
+                    name: job.templateName,
+                    language: { code: job.templateLanguage },
+                    components: []
+                };
+
+                // Header Media
+                if (job.mediaUrl) {
+                    const headerType = getHeaderType(job.mediaUrl); 
+                    body.template.components.push({
+                        type: "header",
+                        parameters: [{
+                            type: headerType,
+                            [headerType]: { link: job.mediaUrl }
+                        }]
+                    });
+                }
+
+                // Body Variables
+                if (job.templateVariables && job.templateVariables.length > 0) {
+                    const params = job.templateVariables.map(val => ({
+                        type: "text",
+                        text: val
+                    }));
+                    body.template.components.push({
+                        type: "body",
+                        parameters: params
+                    });
+                }
+            } 
+            // --- B. Handle Custom Messages ---
+            else {
+                body.type = job.messageType;
+                if (job.messageType === 'text') {
+                    body.text = { body: job.message };
+                } 
+                else if (['image', 'video', 'audio'].includes(job.messageType)) {
+                    body[job.messageType] = { link: job.mediaUrl };
+                    if (job.message && job.messageType !== 'audio') {
+                        body[job.messageType].caption = job.message;
+                    }
+                }
+                else if (job.messageType === 'document') {
+                    body.document = { 
+                        link: job.mediaUrl,
+                        filename: "Attachment.pdf",
+                        caption: job.message || ""
+                    };
+                }
+            }
+
+            // 4. Send Request
+            await axios.post(url, body, {
+                headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" }
+            });
+            
+            success++;
+            console.log(`✅ Sent to ${number}`);
+
+        } catch (err) {
+            console.error(`❌ Failed to ${number}:`, err.response ? err.response.data : err.message);
+            failed++;
+        }
+    }
+
+    // 5. Update Job Status to Completed
+    job.status = "completed";
+    job.successCount = success;
+    job.failCount = failed;
+    await job.save();
+
+    res.status(200).json({ message: `Campaign ${job.name} processed.` });
 
   } catch (err) {
     console.error("Cron Error:", err);
