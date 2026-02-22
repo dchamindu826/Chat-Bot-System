@@ -1,5 +1,4 @@
 const express = require('express');
-const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
 
@@ -16,8 +15,6 @@ const crmRoute = require("./routes/crm");
 const broadcastRoute = require("./routes/broadcast"); 
 const cronRoute = require("./routes/cron"); 
 const quickReplyRoute = require("./routes/quickReplies");
-
-// 🔥 NEW IMPORT (මේ ෆයිල් එක routes ෆෝල්ඩර් එකේ තියෙන්නම ඕන)
 const templateRoute = require("./routes/templates"); 
 
 dotenv.config();
@@ -37,38 +34,8 @@ app.use(cors({
 
 app.use(express.json());
 
-// 🔥 DB CONNECTION (Stable Version)
-let isConnected = false; 
-
-const connectDB = async () => {
-  if (isConnected) {
-    console.log("Using existing DB connection ✅");
-    return;
-  }
-  try {
-    const db = await mongoose.connect(process.env.MONGO_URL, {
-      serverSelectionTimeoutMS: 5000, 
-      socketTimeoutMS: 45000,
-      family: 4 
-    });
-    isConnected = db.connections[0].readyState;
-    console.log("New DB Connection Established ✅");
-  } catch (err) {
-    console.error("DB Connection Error: ❌", err);
-  }
-};
-
-// Middleware to ensure DB connection
-app.use(async (req, res, next) => {
-    if (req.method === 'OPTIONS') {
-        return next();
-    }
-    await connectDB();
-    next();
-});
-
 app.get("/", (req, res) => {
-  res.send("SmartReply CRM Backend is Running! 🚀");
+  res.send("SmartReply CRM Backend is Running! 🚀 (Supabase Version)");
 });
 
 // ✅ Routes Definitions
@@ -83,8 +50,6 @@ app.use("/api/team", teamRoute);
 app.use("/api/crm", crmRoute);
 app.use("/api/broadcast", broadcastRoute); 
 app.use("/api/cron", cronRoute); 
-
-// 🔥 NEW ROUTE (Templates)
 app.use("/api/templates", templateRoute);
 app.use("/api/quick-replies", quickReplyRoute);
 

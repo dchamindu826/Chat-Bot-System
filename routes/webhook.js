@@ -1,46 +1,9 @@
 const router = require("express").Router();
 const axios = require("axios");
-const mongoose = require("mongoose");
-const FormData = require("form-data");
-const User = require("../models/User");
-const Contact = require("../models/Contact");
-const Message = require("../models/Message");
-const BotConfig = require("../models/BotConfig");
-const ChatSession = require("../models/ChatSession");
+const supabase = require("../supabase");
 
-// 🔥 CONFIGURATIONS
 const SESSION_TIMEOUT = 3 * 24 * 60 * 60 * 1000; 
-const MESSAGE_COOLDOWN = 0; // Speed Mode (No Cooldown)
-// const BOT_TYPING_DELAY = 0; // Speed Mode (No Delay)
 
-// DB Connection
-let isConnected = false;
-const connectDB = async () => {
-  if (isConnected) return;
-  try {
-    await mongoose.connect(process.env.MONGO_URL || process.env.MONGO_URI);
-    isConnected = true;
-    console.log("✅ MongoDB Connected");
-  } catch (error) {
-    console.error("❌ DB Error:", error);
-  }
-};
-
-// Cloudinary Uploader
-const processMedia = async (mediaId, accessToken) => {
-    try {
-        const urlRes = await axios.get(`https://graph.facebook.com/v17.0/${mediaId}`, { headers: { Authorization: `Bearer ${accessToken}` } });
-        const mediaRes = await axios.get(urlRes.data.url, { headers: { Authorization: `Bearer ${accessToken}` }, responseType: 'arraybuffer' });
-        const formData = new FormData();
-        formData.append('file', Buffer.from(mediaRes.data), { filename: 'media_file' }); 
-        formData.append('upload_preset', 'Chat Bot System'); 
-        formData.append('cloud_name', 'dyixoaldi'); 
-        const uploadRes = await axios.post(`https://api.cloudinary.com/v1_1/dyixoaldi/auto/upload`, formData, { headers: { ...formData.getHeaders() } });
-        return uploadRes.data.secure_url; 
-    } catch (error) { return null; }
-};
-
-// 1. Verification
 router.get("/", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
@@ -50,30 +13,15 @@ router.get("/", (req, res) => {
   } else { res.sendStatus(403); }
 });
 
-// 2. Ping
-router.get("/ping", (req, res) => { res.status(200).send("Pong!"); });
-
-// 3. Message Handling
 router.post("/", async (req, res) => {
-  const startTime = Date.now(); // ⏱️ Time මනින්න පටන් ගන්නවා
-  console.log(`[${new Date().toISOString()}] 🔥 WEBHOOK RECEIVED:`, JSON.stringify(req.body, null, 2));
   res.status(200).send("EVENT_RECEIVED");
   try {
-    await connectDB();
     const body = req.body;
     if (body.object === "whatsapp_business_account") {
       for (const entry of body.entry) {
         for (const change of entry.changes) {
           const value = change.value;
-
-          // 🔥 UPDATED: Error Logging for Failed Messages
-          if (value.statuses) {
-             const statusObj = value.statuses[0];
-             if (statusObj.status === "failed") {
-                 console.error(`❌ WhatsApp Error for ${statusObj.recipient_id}:`, JSON.stringify(statusObj.errors));
-             }
-             continue; 
-          }
+          if (value.statuses) continue; 
 
           if (value.messages && value.messages.length > 0) {
             const msgObj = value.messages[0];
@@ -81,132 +29,87 @@ router.post("/", async (req, res) => {
             const msgType = msgObj.type; 
             const phone_number_id = value.metadata.phone_number_id;
 
-            const client = await User.findOne({ "whatsappConfig.phoneNumberId": phone_number_id });
-            if (!client) continue; 
+            console.log(`📩 Incoming message from: ${from}`);
 
-            // Save Incoming Message
-            let msgBody = "Media File";
-            let mediaUrl = null;
-            if (msgType === "text") msgBody = msgObj.text.body;
-            else if (["image", "video", "audio", "document", "voice"].includes(msgType)) {
-                msgBody = msgObj[msgType].caption || `📷 ${msgType} Received`;
-                if (msgObj[msgType].id) mediaUrl = await processMedia(msgObj[msgType].id, client.whatsappConfig.accessToken);
+            // Client හොයනවා
+            const { data: client, error: clientErr } = await supabase.from('users').select('*').eq('phone_number_id', phone_number_id).single();
+            if (!client) {
+                console.log("❌ Webhook: Client not found!");
+                continue; 
             }
 
-            let contact = await Contact.findOne({ phoneNumber: from, ownerId: client._id });
-            if (!contact) contact = new Contact({ phoneNumber: from, ownerId: client._id, name: `Guest ${from.slice(-4)}` });
-            
-            contact.lastMessage = msgBody;
-            contact.lastMessageTime = new Date();
-            contact.unreadCount = (contact.unreadCount || 0) + 1;
-            await contact.save();
+            let msgBody = msgType === "text" ? msgObj.text.body : `📷 ${msgType} Received`;
 
-            await Message.create({ contactId: contact._id, text: msgBody, sender: "customer", ownerId: client._id, type: msgType === 'voice' ? 'audio' : msgType, mediaUrl: mediaUrl });
+            // Contact හොයනවා
+            let { data: contact } = await supabase.from('contacts').select('*').eq('phone_number', from).eq('owner_id', client.id).single();
+            
+            if (!contact) {
+                const { data: newContact, error: insertErr } = await supabase.from('contacts').insert([{ 
+                    phone_number: from, owner_id: client.id, name: `Guest ${from.slice(-4)}`, unread_count: 1 
+                }]).select().single();
+                
+                if (insertErr) console.log("❌ Webhook Contact Error:", insertErr);
+                contact = newContact;
+            } else {
+                await supabase.from('contacts').update({ 
+                    last_message: msgBody, 
+                    last_message_time: new Date().toISOString(), 
+                    unread_count: (contact.unread_count || 0) + 1 
+                }).eq('id', contact.id);
+            }
+
+            // Message එක Save කරනවා
+            const { error: msgErr } = await supabase.from('messages').insert([{ 
+                contact_id: contact.id, 
+                owner_id: client.id, 
+                text: msgBody, 
+                sender: "customer", 
+                type: msgType 
+            }]);
+
+            if (msgErr) console.log("❌ Webhook Message Error:", msgErr);
+            else console.log("✅ Webhook Message Saved Successfully!");
 
             // Bot Logic
-            const botConfig = await BotConfig.findOne({ ownerId: client._id });
-            if (botConfig && botConfig.isActive && botConfig.replies.length > 0) {
-                let session = await ChatSession.findOne({ userId: client._id, phoneNumber: from });
-                if (!session) session = new ChatSession({ userId: client._id, phoneNumber: from, currentStep: 0, lastActive: Date.now() });
+            const { data: botConfig } = await supabase.from('bot_configs').select('*').eq('owner_id', client.id).single();
+            
+            if (botConfig && botConfig.is_active && botConfig.replies && botConfig.replies.length > 0) {
+                let { data: session } = await supabase.from('chat_sessions').select('*').eq('user_id', client.id).eq('phone_number', from).single();
+                
+                if (!session) {
+                    const { data: newSession } = await supabase.from('chat_sessions').insert([{ user_id: client.id, phone_number: from, current_step: 0 }]).select().single();
+                    session = newSession;
+                }
 
-                if ((Date.now() - new Date(session.lastActive).getTime()) > SESSION_TIMEOUT) session.currentStep = 0; 
-                if ((msgObj.text?.body || "").toLowerCase().match(/hi|start|menu/)) session.currentStep = 0;
+                if ((Date.now() - new Date(session.last_active).getTime()) > SESSION_TIMEOUT) session.current_step = 0; 
+                if ((msgObj.text?.body || "").toLowerCase().match(/hi|start|menu/)) session.current_step = 0;
 
-                if (session.currentStep < botConfig.replies.length) {
-                    const reply = botConfig.replies[session.currentStep];
-                    
-                    console.log(`⏱️ DB Queries වලට ගිය වෙලාව: ${Date.now() - startTime}ms`);
+                if (session.current_step < botConfig.replies.length) {
+                    const reply = botConfig.replies[session.current_step];
                     
                     await sendWhatsAppMessage(client, from, reply);
-                    await Message.create({ contactId: contact._id, text: reply.text || "Bot Reply", sender: "me", ownerId: client._id, isBotReply: true });
+                    await supabase.from('messages').insert([{ contact_id: contact.id, owner_id: client.id, text: reply.text || "Bot Reply", sender: "me", is_bot_reply: true }]);
 
-                    console.log(`⏱️ සම්පූර්ණ Process එකට ගිය වෙලාව: ${Date.now() - startTime}ms`);
-
-                    session.currentStep += 1;
-                    session.lastActive = Date.now();
-                    await session.save();
+                    await supabase.from('chat_sessions').update({ current_step: session.current_step + 1, last_active: new Date().toISOString() }).eq('id', session.id);
                 } else {
-                    session.lastActive = Date.now();
-                    await session.save();
+                    await supabase.from('chat_sessions').update({ last_active: new Date().toISOString() }).eq('id', session.id);
                 }
             }
           }
         }
       }
     }
-  } catch (err) { console.error("Webhook Error:", err.message); }
+  } catch (err) { console.error("❌ Webhook Fatal Error:", err.message); }
 });
 
-// 🔥 Helper: Send Message (DEBUG VERSION)
 const sendWhatsAppMessage = async (client, to, replyStep) => {
   try {
-    const url = `https://graph.facebook.com/v17.0/${client.whatsappConfig.phoneNumberId}/messages`;
-    const token = client.whatsappConfig.accessToken;
+    const url = `https://graph.facebook.com/v17.0/${client.phone_number_id}/messages`;
+    const token = client.access_token;
     const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
-    
-    let body = { messaging_product: "whatsapp", recipient_type: "individual", to: to };
-
-    if (replyStep.media && replyStep.media.trim() !== "") {
-      let type = replyStep.mediaType || "image";
-      let mediaLink = replyStep.media.trim();
-
-      // Auto-detect type
-      if (!type || type === 'file') {
-          if (mediaLink.match(/\.(mp3|wav|ogg)$/i)) type = "audio";
-          else if (mediaLink.match(/\.(mp4|mov|avi)$/i)) type = "video";
-          else if (mediaLink.includes("/video/") && !mediaLink.includes("/audio/")) type = "video"; 
-      }
-
-      body.type = type;
-
-      if (type === "audio") {
-          if (!mediaLink.toLowerCase().endsWith(".mp3") && !mediaLink.includes("?")) mediaLink += ".mp3";
-          body.audio = { link: mediaLink };
-          
-          await axios.post(url, body, { headers });
-          
-          if (replyStep.text && replyStep.text.trim() !== "") {
-              const textBody = { 
-                  messaging_product: "whatsapp", recipient_type: "individual", to: to, type: "text", text: { body: replyStep.text } 
-              };
-              await axios.post(url, textBody, { headers });
-          }
-          return;
-      }
-      else if (type === "video") {
-          
-          console.log("🎥 Original Video Link:", mediaLink);
-
-          // 🔥 CLEAN VERSION: No Cloudinary Transformations
-          // Video eka api manual convert karala upload karamu.
-          
-          // Extension eka nethnam witharak dagannawa safety ekata
-          if (!mediaLink.toLowerCase().endsWith(".mp4") && !mediaLink.includes("?")) {
-              mediaLink += ".mp4";
-          }
-          
-          console.log("🚀 Sending Direct Link:", mediaLink);
-
-          body.video = { link: mediaLink, caption: replyStep.text || "" };
-      }
-      else if (type === "document") {
-          body.document = { link: mediaLink, caption: replyStep.text || "", filename: replyStep.fileName || "File.pdf" };
-      }
-      else {
-          body.image = { link: mediaLink, caption: replyStep.text || "" };
-      }
-    } else {
-      body.type = "text";
-      body.text = { body: replyStep.text };
-    }
-
-    // Send Request
-    const res = await axios.post(url, body, { headers });
-    console.log(`✅ Message Sent to ${to} | ID: ${res.data.messages[0].id}`);
-
-  } catch (error) { 
-      console.error("❌ Bot Send Failed Details:", error.response ? JSON.stringify(error.response.data) : error.message); 
-  }
+    let body = { messaging_product: "whatsapp", recipient_type: "individual", to: to, type: "text", text: { body: replyStep.text } };
+    await axios.post(url, body, { headers });
+  } catch (error) { console.error("❌ Bot Send Failed"); }
 };
 
 module.exports = router;
