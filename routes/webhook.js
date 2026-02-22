@@ -31,28 +31,30 @@ router.post("/", async (req, res) => {
 
             console.log(`📩 Incoming message from: ${from}`);
 
-            // Client හොයනවා
-            const { data: client, error: clientErr } = await supabase.from('users').select('*').eq('phone_number_id', phone_number_id).single();
-            if (clientErr) {
-                console.log("⚠️ DB Search Error:", clientErr.message); // මේකත් දාන්න
-            }
+            // 1. Client හොයනවා (.single() වෙනුවට .limit(1) දාලා තියෙන්නේ DB එකේ duplicate තිබ්බත් crash නොවෙන්න)
+            const { data: clients, error: clientErr } = await supabase.from('users').select('*').eq('phone_number_id', phone_number_id).limit(1);
+            if (clientErr) console.log("⚠️ DB Search Error:", clientErr.message);
+            
+            const client = clients && clients.length > 0 ? clients[0] : null;
+
             if (!client) {
-                console.log("❌ Webhook: Client not found!");
+                console.log("❌ Webhook: Client not found for phone_number_id:", phone_number_id);
                 continue; 
             }
 
             let msgBody = msgType === "text" ? msgObj.text.body : `📷 ${msgType} Received`;
 
-            // Contact හොයනවා
-            let { data: contact } = await supabase.from('contacts').select('*').eq('phone_number', from).eq('owner_id', client.id).single();
+            // 2. Contact හොයනවා (.single() ඉවත් කර ඇත)
+            let { data: contacts } = await supabase.from('contacts').select('*').eq('phone_number', from).eq('owner_id', client.id).limit(1);
+            let contact = contacts && contacts.length > 0 ? contacts[0] : null;
             
             if (!contact) {
-                const { data: newContact, error: insertErr } = await supabase.from('contacts').insert([{ 
+                const { data: newContacts, error: insertErr } = await supabase.from('contacts').insert([{ 
                     phone_number: from, owner_id: client.id, name: `Guest ${from.slice(-4)}`, unread_count: 1 
-                }]).select().single();
+                }]).select().limit(1);
                 
                 if (insertErr) console.log("❌ Webhook Contact Error:", insertErr);
-                contact = newContact;
+                contact = newContacts && newContacts.length > 0 ? newContacts[0] : null;
             } else {
                 await supabase.from('contacts').update({ 
                     last_message: msgBody, 
@@ -61,7 +63,9 @@ router.post("/", async (req, res) => {
                 }).eq('id', contact.id);
             }
 
-            // Message එක Save කරනවා
+            if(!contact) continue; // Safety check
+
+            // 3. Customer එවපු Message එක DB එකේ Save කරනවා
             const { error: msgErr } = await supabase.from('messages').insert([{ 
                 contact_id: contact.id, 
                 owner_id: client.id, 
@@ -73,30 +77,50 @@ router.post("/", async (req, res) => {
             if (msgErr) console.log("❌ Webhook Message Error:", msgErr);
             else console.log("✅ Webhook Message Saved Successfully!");
 
-            // Bot Logic
-            const { data: botConfig } = await supabase.from('bot_configs').select('*').eq('owner_id', client.id).single();
+            // 4. Bot Auto Reply Logic (.single() ඉවත් කර ඇත)
+            const { data: botConfigs } = await supabase.from('bot_configs').select('*').eq('owner_id', client.id).limit(1);
+            const botConfig = botConfigs && botConfigs.length > 0 ? botConfigs[0] : null;
             
             if (botConfig && botConfig.is_active && botConfig.replies && botConfig.replies.length > 0) {
-                let { data: session } = await supabase.from('chat_sessions').select('*').eq('user_id', client.id).eq('phone_number', from).single();
+                let { data: sessions } = await supabase.from('chat_sessions').select('*').eq('user_id', client.id).eq('phone_number', from).limit(1);
+                let session = sessions && sessions.length > 0 ? sessions[0] : null;
                 
                 if (!session) {
-                    const { data: newSession } = await supabase.from('chat_sessions').insert([{ user_id: client.id, phone_number: from, current_step: 0 }]).select().single();
-                    session = newSession;
+                    const { data: newSessions } = await supabase.from('chat_sessions').insert([{ user_id: client.id, phone_number: from, current_step: 0 }]).select().limit(1);
+                    session = newSessions && newSessions.length > 0 ? newSessions[0] : null;
                 }
 
+                if(!session) continue; // Safety check
+
+                // පරණ session එකක් නම් හෝ "hi", "menu" එව්වොත් මුල ඉඳන් පටන් ගන්නවා
                 if ((Date.now() - new Date(session.last_active).getTime()) > SESSION_TIMEOUT) session.current_step = 0; 
                 if ((msgObj.text?.body || "").toLowerCase().match(/hi|start|menu/)) session.current_step = 0;
 
+                // ඊළඟට යවන්න ඕන Step එක තියෙනවද බලනවා
                 if (session.current_step < botConfig.replies.length) {
                     const reply = botConfig.replies[session.current_step];
                     
+                    // WhatsApp API එකට කෝල් කරලා මැසේජ් එක යවනවා
                     await sendWhatsAppMessage(client, from, reply);
-                    await supabase.from('messages').insert([{ contact_id: contact.id, owner_id: client.id, text: reply.text || "Bot Reply", sender: "me", is_bot_reply: true }]);
+                    
+                    // යැව්ව මැසේජ් එක අපේ DB එකෙත් Save කරනවා
+                    await supabase.from('messages').insert([{ 
+                        contact_id: contact.id, 
+                        owner_id: client.id, 
+                        text: reply.text || "Bot Reply", 
+                        sender: "me", 
+                        is_bot_reply: true, 
+                        type: reply.mediaType || 'text', 
+                        content: reply.media || null 
+                    }]);
 
+                    // Session එක අලුත් කරනවා
                     await supabase.from('chat_sessions').update({ current_step: session.current_step + 1, last_active: new Date().toISOString() }).eq('id', session.id);
                 } else {
                     await supabase.from('chat_sessions').update({ last_active: new Date().toISOString() }).eq('id', session.id);
                 }
+            } else {
+                console.log("⚠️ Bot is not active or no replies configured for this client.");
             }
           }
         }
@@ -105,14 +129,36 @@ router.post("/", async (req, res) => {
   } catch (err) { console.error("❌ Webhook Fatal Error:", err.message); }
 });
 
+// Meta API එකට මැසේජ් එක යවන Function එක (Media යවන්නත් පුළුවන් විදියට හදලා තියෙන්නේ)
 const sendWhatsAppMessage = async (client, to, replyStep) => {
   try {
     const url = `https://graph.facebook.com/v17.0/${client.phone_number_id}/messages`;
     const token = client.access_token;
     const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
-    let body = { messaging_product: "whatsapp", recipient_type: "individual", to: to, type: "text", text: { body: replyStep.text } };
+    
+    let body = { 
+        messaging_product: "whatsapp", 
+        recipient_type: "individual", 
+        to: to 
+    };
+
+    // Text එකක්ද Media එකක්ද කියලා බලලා යවනවා
+    if (replyStep.mediaType && replyStep.mediaType !== 'text' && replyStep.media) {
+        body.type = replyStep.mediaType; // "image", "video", "document", "audio"
+        body[replyStep.mediaType] = { link: replyStep.media };
+        if(replyStep.text && replyStep.mediaType !== 'audio') {
+            body[replyStep.mediaType].caption = replyStep.text;
+        }
+    } else {
+        body.type = "text";
+        body.text = { body: replyStep.text };
+    }
+
     await axios.post(url, body, { headers });
-  } catch (error) { console.error("❌ Bot Send Failed"); }
+    console.log(`✅ Bot Reply Sent Successfully to ${to} 🚀`);
+  } catch (error) { 
+      console.error("❌ Bot Send Failed:", error.response ? error.response.data : error.message); 
+  }
 };
 
 module.exports = router;
