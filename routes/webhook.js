@@ -14,6 +14,7 @@ router.get("/", (req, res) => {
 });
 
 router.post("/", async (req, res) => {
+  console.log("🔥 WEBHOOK HIT! Meta is sending data...");
   res.status(200).send("EVENT_RECEIVED");
   try {
     const body = req.body;
