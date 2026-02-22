@@ -78,10 +78,23 @@ router.post("/", async (req, res) => {
             if (msgErr) console.log("❌ Webhook Message Error:", msgErr);
             else console.log("✅ Webhook Message Saved Successfully!");
 
-            // 4. Bot Auto Reply Logic (.single() ඉවත් කර ඇත)
-            const { data: botConfigs } = await supabase.from('bot_configs').select('*').eq('owner_id', client.id).limit(1);
+            // 4. Bot Auto Reply Logic
+            const { data: botConfigs, error: botErr } = await supabase.from('bot_configs').select('*').eq('owner_id', client.id).limit(1);
+            
+            if (botErr) {
+                console.log("❌ Error fetching bot config:", botErr.message);
+            }
+            
             const botConfig = botConfigs && botConfigs.length > 0 ? botConfigs[0] : null;
             
+            // Debugging සඳහා මොනවද ආවේ කියලා ප්‍රින්ට් කරමු
+            console.log("🤖 Found Bot Config:", botConfig ? "Yes" : "No");
+            if (botConfig) {
+                 console.log("   - is_active:", botConfig.is_active);
+                 console.log("   - replies length:", botConfig.replies ? botConfig.replies.length : 0);
+            }
+            
+            // මෙතන is_active කියලා වෙනස් කළා (Supabase column name එක)
             if (botConfig && botConfig.is_active && botConfig.replies && botConfig.replies.length > 0) {
                 let { data: sessions } = await supabase.from('chat_sessions').select('*').eq('user_id', client.id).eq('phone_number', from).limit(1);
                 let session = sessions && sessions.length > 0 ? sessions[0] : null;
@@ -91,20 +104,19 @@ router.post("/", async (req, res) => {
                     session = newSessions && newSessions.length > 0 ? newSessions[0] : null;
                 }
 
-                if(!session) continue; // Safety check
+                if(!session) {
+                    console.log("❌ Could not create/find chat session.");
+                    continue; 
+                }
 
-                // පරණ session එකක් නම් හෝ "hi", "menu" එව්වොත් මුල ඉඳන් පටන් ගන්නවා
                 if ((Date.now() - new Date(session.last_active).getTime()) > SESSION_TIMEOUT) session.current_step = 0; 
                 if ((msgObj.text?.body || "").toLowerCase().match(/hi|start|menu/)) session.current_step = 0;
 
-                // ඊළඟට යවන්න ඕන Step එක තියෙනවද බලනවා
                 if (session.current_step < botConfig.replies.length) {
                     const reply = botConfig.replies[session.current_step];
                     
-                    // WhatsApp API එකට කෝල් කරලා මැසේජ් එක යවනවා
                     await sendWhatsAppMessage(client, from, reply);
                     
-                    // යැව්ව මැසේජ් එක අපේ DB එකෙත් Save කරනවා
                     await supabase.from('messages').insert([{ 
                         contact_id: contact.id, 
                         owner_id: client.id, 
@@ -115,7 +127,6 @@ router.post("/", async (req, res) => {
                         content: reply.media || null 
                     }]);
 
-                    // Session එක අලුත් කරනවා
                     await supabase.from('chat_sessions').update({ current_step: session.current_step + 1, last_active: new Date().toISOString() }).eq('id', session.id);
                 } else {
                     await supabase.from('chat_sessions').update({ last_active: new Date().toISOString() }).eq('id', session.id);
