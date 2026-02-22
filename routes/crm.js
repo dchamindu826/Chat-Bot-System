@@ -5,7 +5,6 @@ const { verifyToken } = require("../verifyToken");
 // 1. GET ALL CONTACTS (Smart Filter)
 router.get("/contacts", verifyToken, async (req, res) => {
   try {
-    // Current User ගේ Role එක බලන්න Users table එකට යනවා
     const { data: currentUser, error: userErr } = await supabase
       .from('users')
       .select('role')
@@ -20,10 +19,8 @@ router.get("/contacts", verifyToken, async (req, res) => {
     `);
 
     if (currentUser.role === 'agent') {
-        // Agent nam eyata assign wechcha ewa witharai
         query = query.eq('assigned_to', req.user.id);
     } else {
-        // Admin nam okkoma
         query = query.eq('owner_id', req.user.id);
     }
 
@@ -31,10 +28,10 @@ router.get("/contacts", verifyToken, async (req, res) => {
 
     if (contactErr) throw contactErr;
 
-    // Frontend එක MongoDB _id format එක බලාපොරොත්තු වන නිසා map කරනවා
     const formattedContacts = (contacts || []).map(c => ({
         ...c,
         _id: c.id,
+        phoneNumber: c.phone_number, // 🔥 FIXED: Mapping phone_number to phoneNumber
         ownerId: c.owner_id,
         assignedTo: c.assignedTo ? { ...c.assignedTo, _id: c.assigned_to } : null,
         callStatus: c.call_status,
@@ -58,7 +55,6 @@ router.put("/contact/:id", verifyToken, async (req, res) => {
     try {
         const updateData = { ...req.body };
         
-        // Frontend එකෙන් එන CamelCase ඒවා Database එකේ Snake Case වලට හරවනවා
         if(updateData.callStatus) { updateData.call_status = updateData.callStatus; delete updateData.callStatus; }
         if(updateData.attemptMethod) { updateData.attempt_method = updateData.attemptMethod; delete updateData.attemptMethod; }
         if(updateData.attemptCount) { updateData.attempt_count = updateData.attemptCount; delete updateData.attemptCount; }
@@ -70,7 +66,7 @@ router.put("/contact/:id", verifyToken, async (req, res) => {
             .select();
 
         if (error) throw error;
-        res.status(200).json({ ...data[0], _id: data[0].id });
+        res.status(200).json({ ...data[0], _id: data[0].id, phoneNumber: data[0].phone_number });
     } catch (err) {
         res.status(500).json({ message: err.message });
     }
@@ -101,7 +97,7 @@ router.get("/contact/:id", verifyToken, async (req, res) => {
             .single();
 
         if (error) throw error;
-        res.status(200).json({ ...data, _id: data.id });
+        res.status(200).json({ ...data, _id: data.id, phoneNumber: data.phone_number });
     } catch (err) {
         res.status(500).json({ message: err.message });
     }
@@ -125,7 +121,7 @@ router.put("/update-status/:id", verifyToken, async (req, res) => {
             .select();
 
         if (error) throw error;
-        res.status(200).json({ ...data[0], _id: data[0].id });
+        res.status(200).json({ ...data[0], _id: data[0].id, phoneNumber: data[0].phone_number });
     } catch (err) {
         console.error("Status Update Error:", err);
         res.status(500).json({ message: err.message });
