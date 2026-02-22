@@ -56,4 +56,43 @@ router.post("/client", async (req, res) => {
     }
 });
 
+// 3. UPDATE CLIENT (Edit Client එකට සහ Bot Config Update වලට)
+router.put("/client/:id", async (req, res) => {
+    try {
+        const clientId = req.params.id;
+        let updateData = { ...req.body };
+
+        // Password වෙනස් කරනවා නම් විතරක් Encrypt කරන්න
+        if (updateData.password) {
+            updateData.password = CryptoJS.AES.encrypt(updateData.password, process.env.PASS_SEC).toString();
+        }
+
+        // WhatsApp Config එක වෙනම ආවොත් ඒක Flat කරලා ගන්නවා
+        if (updateData.whatsappConfig) {
+            updateData.phone_number_id = updateData.whatsappConfig.phoneNumberId;
+            updateData.waba_id = updateData.whatsappConfig.wabaId;
+            updateData.access_token = updateData.whatsappConfig.accessToken;
+            delete updateData.whatsappConfig;
+        }
+
+        // Business Name එක Flat කරලා ගන්නවා
+        if (updateData.businessName) {
+             updateData.business_name = updateData.businessName;
+             delete updateData.businessName;
+        }
+
+        const { data, error } = await supabase.from("users")
+            .update(updateData)
+            .eq("id", clientId)
+            .select();
+
+        if (error) throw error;
+        if (!data || data.length === 0) return res.status(404).json({ message: "Client not found" });
+        
+        res.status(200).json(formatUser(data[0]));
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+});
+
 module.exports = router;
