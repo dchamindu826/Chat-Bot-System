@@ -55,6 +55,8 @@ router.get("/ping", (req, res) => { res.status(200).send("Pong!"); });
 
 // 3. Message Handling
 router.post("/", async (req, res) => {
+  const startTime = Date.now(); // ⏱️ Time මනින්න පටන් ගන්නවා
+  console.log(`[${new Date().toISOString()}] 🔥 WEBHOOK RECEIVED:`, JSON.stringify(req.body, null, 2));
   res.status(200).send("EVENT_RECEIVED");
   try {
     await connectDB();
@@ -113,8 +115,12 @@ router.post("/", async (req, res) => {
                 if (session.currentStep < botConfig.replies.length) {
                     const reply = botConfig.replies[session.currentStep];
                     
+                    console.log(`⏱️ DB Queries වලට ගිය වෙලාව: ${Date.now() - startTime}ms`);
+                    
                     await sendWhatsAppMessage(client, from, reply);
                     await Message.create({ contactId: contact._id, text: reply.text || "Bot Reply", sender: "me", ownerId: client._id, isBotReply: true });
+
+                    console.log(`⏱️ සම්පූර්ණ Process එකට ගිය වෙලාව: ${Date.now() - startTime}ms`);
 
                     session.currentStep += 1;
                     session.lastActive = Date.now();
