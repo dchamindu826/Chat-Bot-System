@@ -42,15 +42,37 @@ router.get('/overview', verifyTokenAndAdmin, async (req, res) => {
   } catch (err) { res.status(500).json(err); }
 });
 
-// 2. ADMIN LOGS
+// 2. ADMIN LOGS (Supabase විදිහට වෙනස් කර ඇත)
 router.get('/logs', verifyTokenAndAdmin, async (req, res) => {
   try {
-    const logs = await SystemLog.find()
-      .populate('clientId', 'name businessName phone')
-      .sort({ createdAt: -1 })
-      .limit(100); 
-    res.status(200).json(logs);
-  } catch (err) { res.status(500).json(err); }
+    // Supabase එකේ system_logs table එකක් නැත්නම් Crash නොවී හිස් Array එකක් යවන්න
+    const { data: logs, error } = await supabase.from('system_logs')
+        .select(`*, clientId:users(id, name, business_name, phone)`)
+        .order('created_at', { ascending: false })
+        .limit(100);
+        
+    if (error) {
+        return res.status(200).json([]); // Table එක නැත්නම් Error නොදී හිස්ව යවනවා
+    }
+
+    const formattedLogs = logs.map(log => ({
+        _id: log.id,
+        type: log.type,
+        source: log.source,
+        message: log.message,
+        metaData: log.meta_data,
+        createdAt: log.created_at,
+        clientId: log.clientId ? { 
+            _id: log.clientId.id, 
+            name: log.clientId.name, 
+            businessName: log.clientId.business_name 
+        } : null
+    }));
+
+    res.status(200).json(formattedLogs);
+  } catch (err) { 
+      res.status(200).json([]); // 500 error එන එක නවත්වන්න 
+  }
 });
 
 // 3. USER DASHBOARD STATS

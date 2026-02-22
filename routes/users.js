@@ -1,6 +1,8 @@
 const router = require("express").Router();
 const { createClient } = require("@supabase/supabase-js");
 const CryptoJS = require("crypto-js");
+const jwt = require("jsonwebtoken"); // මේක අලුතෙන් දාන්න
+const { verifyToken } = require("../verifyToken"); // මේක අලුතෙන් දාන්න
 
 // Supabase Connection
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
@@ -15,6 +17,37 @@ const formatUser = (u) => ({
         wabaId: u.waba_id,
         accessToken: u.access_token
     }
+});
+
+// 🔥 FIX 1: GET ALL USERS (Admin settings වලදි user ලිස්ට් එක ගන්න)
+router.get("/", verifyToken, async (req, res) => {
+    try {
+        const { data, error } = await supabase.from("users").select("*");
+        if (error) throw error;
+        res.status(200).json((data || []).map(formatUser));
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// 🔥 FIX 2: GHOST LOGIN (Frontend එකෙන් එන විදිහට මේක users.js එකේ තියෙන්න ඕනේ)
+router.post("/ghost-login/:id", verifyToken, async (req, res) => {
+    try {
+        if (req.user.role !== 'admin') return res.status(403).json({ message: "Access Denied." });
+
+        const { data: targetUser, error } = await supabase.from('users').select('*').eq('id', req.params.id).single();
+        if (error || !targetUser) return res.status(404).json({ message: "User not found" });
+
+        const ghostToken = jwt.sign(
+            { id: targetUser.id, role: targetUser.role, businessName: targetUser.business_name },
+            process.env.JWT_SEC,
+            { expiresIn: "1d" }
+        );
+
+        res.status(200).json({ 
+            message: "Ghost Access Granted", token: ghostToken, user: { id: targetUser.id, name: targetUser.name, role: targetUser.role }
+        });
+    } catch (err) { res.status(500).json(err); }
 });
 
 // 1. GET ALL CLIENTS (ලිස්ට් එක පෙන්නන්න)
