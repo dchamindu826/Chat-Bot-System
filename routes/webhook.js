@@ -33,6 +33,9 @@ router.post("/", async (req, res) => {
 
             // Client හොයනවා
             const { data: client, error: clientErr } = await supabase.from('users').select('*').eq('phone_number_id', phone_number_id).single();
+            if (clientErr) {
+                console.log("⚠️ DB Search Error:", clientErr.message); // මේකත් දාන්න
+            }
             if (!client) {
                 console.log("❌ Webhook: Client not found!");
                 continue; 
