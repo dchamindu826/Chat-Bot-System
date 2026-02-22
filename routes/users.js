@@ -1,104 +1,59 @@
-const router = require('express').Router();
-const User = require('../models/User');
-const BotConfig = require('../models/BotConfig');
-const { verifyTokenAndAdmin } = require('../verifyToken');
+const router = require("express").Router();
+const { createClient } = require("@supabase/supabase-js");
 const CryptoJS = require("crypto-js");
-const jwt = require("jsonwebtoken");
 
-// 1. GET ALL CLIENTS
-router.get('/clients', verifyTokenAndAdmin, async (req, res) => {
-  try {
-    const clients = await User.find({ role: 'user' }).sort({ createdAt: -1 });
-    const clientsData = clients.map(client => {
-      const { password, ...others } = client._doc;
-      return others;
-    });
-    res.status(200).json(clientsData);
-  } catch (err) {
-    res.status(500).json(err);
-  }
+// Supabase Connection
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+
+// Frontend එකට පරණ MongoDB format එකටම (_id) ඩේටා හදලා යවන Function එක
+const formatUser = (u) => ({
+    ...u,
+    _id: u.id,
+    businessName: u.business_name,
+    whatsappConfig: {
+        phoneNumberId: u.phone_number_id,
+        wabaId: u.waba_id,
+        accessToken: u.access_token
+    }
 });
 
-// 2. CREATE CLIENT
-router.post('/client', verifyTokenAndAdmin, async (req, res) => {
+// 1. GET ALL CLIENTS (ලිස්ට් එක පෙන්නන්න)
+router.get("/clients", async (req, res) => {
     try {
-        const encryptedPassword = CryptoJS.AES.encrypt(
-          req.body.password,
-          process.env.PASS_SEC
-        ).toString();
-
-        const newUser = new User({
-            name: req.body.name,
-            email: req.body.email,
-            password: encryptedPassword,
-            role: 'user',
-            businessName: req.body.businessName,
-            phone: req.body.phone,
-            status: 'active',
-            
-            // ✅ WABA ID will be included inside whatsappConfig from frontend
-            whatsappConfig: req.body.whatsappConfig 
-        });
-        
-        const savedUser = await newUser.save();
-        res.status(200).json(savedUser);
+        const { data, error } = await supabase.from("users").select("*").eq("role", "user");
+        if (error) throw error;
+        res.status(200).json((data || []).map(formatUser));
     } catch (err) {
-        res.status(500).json(err);
+        res.status(500).json({ error: err.message });
     }
 });
 
-// 3. UPDATE CLIENT
-router.put('/client/:id', verifyTokenAndAdmin, async (req, res) => {
-  try {
-    if (req.body.password) {
-      req.body.password = CryptoJS.AES.encrypt(
-        req.body.password,
-        process.env.PASS_SEC
-      ).toString();
+// 2. CREATE CLIENT (අලුත් Client කෙනෙක් Register කරන්න)
+router.post("/client", async (req, res) => {
+    try {
+        const { name, email, password, businessName, phone, whatsappConfig } = req.body;
+        
+        // Password එක පරණ විදිහටම Encrypt කරනවා
+        const encryptedPassword = CryptoJS.AES.encrypt(password, process.env.PASS_SEC).toString();
+
+        const { data, error } = await supabase.from("users").insert([{
+            name, 
+            email, 
+            password: encryptedPassword, 
+            phone,
+            business_name: businessName,
+            role: "user",
+            phone_number_id: whatsappConfig?.phoneNumberId,
+            waba_id: whatsappConfig?.wabaId,
+            access_token: whatsappConfig?.accessToken,
+            status: "active"
+        }]).select();
+
+        if (error) throw error;
+        res.status(201).json(formatUser(data[0]));
+    } catch (err) {
+        res.status(500).json({ message: err.message });
     }
-
-    const updatedUser = await User.findByIdAndUpdate(
-      req.params.id,
-      { 
-        $set: req.body 
-      },
-      { new: true }
-    );
-    res.status(200).json(updatedUser);
-  } catch (err) {
-    res.status(500).json(err);
-  }
-});
-
-// 4. DELETE CLIENT
-router.delete('/client/:id', verifyTokenAndAdmin, async (req, res) => {
-  try {
-    await User.findByIdAndDelete(req.params.id);
-    await BotConfig.findOneAndDelete({ userId: req.params.id });
-    res.status(200).json("Client has been deleted...");
-  } catch (err) {
-    res.status(500).json(err);
-  }
-});
-
-// 5. GHOST LOGIN
-router.post('/ghost-login/:id', verifyTokenAndAdmin, async (req, res) => {
-  try {
-    const user = await User.findById(req.params.id);
-    if (!user) return res.status(404).json("User not found!");
-
-    const accessToken = jwt.sign(
-      { id: user._id, role: user.role, businessName: user.businessName },
-      process.env.JWT_SEC,
-      { expiresIn: "3d" }
-    );
-
-    const { password, ...others } = user._doc;
-    res.status(200).json({ ...others, accessToken });
-
-  } catch (err) {
-    res.status(500).json(err);
-  }
 });
 
 module.exports = router;
