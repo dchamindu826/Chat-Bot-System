@@ -2,7 +2,7 @@ const router = require("express").Router();
 const supabase = require("../supabase");
 const { verifyToken } = require("../verifyToken");
 
-// 1. GET ALL CONTACTS (Smart Filter)
+// 1. GET ALL CONTACTS (Smart Filter) - 🔥 FIXED: Removed complex joins for safety
 router.get("/contacts", verifyToken, async (req, res) => {
   try {
     const { data: currentUser, error: userErr } = await supabase
@@ -13,10 +13,8 @@ router.get("/contacts", verifyToken, async (req, res) => {
 
     if (userErr) throw userErr;
 
-    let query = supabase.from('contacts').select(`
-      *,
-      assignedTo:users!contacts_assigned_to_fkey(name, email)
-    `);
+    // සරලවම contacts ටේබල් එක විතරක් ගන්නවා.
+    let query = supabase.from('contacts').select('*');
 
     if (currentUser.role === 'agent') {
         query = query.eq('assigned_to', req.user.id);
@@ -31,9 +29,9 @@ router.get("/contacts", verifyToken, async (req, res) => {
     const formattedContacts = (contacts || []).map(c => ({
         ...c,
         _id: c.id,
-        phoneNumber: c.phone_number, // 🔥 FIXED: Mapping phone_number to phoneNumber
+        phoneNumber: c.phone_number,
         ownerId: c.owner_id,
-        assignedTo: c.assignedTo ? { ...c.assignedTo, _id: c.assigned_to } : null,
+        assignedTo: c.assigned_to, // 🔥 කෙලින්ම Agent ගේ ID එක (UUID) යවනවා
         callStatus: c.call_status,
         lastMessage: c.last_message,
         lastMessageTime: c.last_message_time,
@@ -50,7 +48,7 @@ router.get("/contacts", verifyToken, async (req, res) => {
   }
 });
 
-// 🔥 2. UPDATE CONTACT (Fixed for Campaign Dashboard)
+// 2. UPDATE CONTACT 
 router.put("/contact/:id", verifyToken, async (req, res) => {
     try {
         const updateData = { ...req.body };
@@ -103,7 +101,7 @@ router.get("/contact/:id", verifyToken, async (req, res) => {
     }
 });
 
-// 5. UPDATE CALL STATUS (Legacy Route)
+// 5. UPDATE CALL STATUS
 router.put("/update-status/:id", verifyToken, async (req, res) => {
     try {
         const { callStatus, remarks, attemptMethod, attemptCount, phase } = req.body;

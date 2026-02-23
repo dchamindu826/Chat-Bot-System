@@ -115,18 +115,23 @@ router.post("/", async (req, res) => {
                     
                     await sendWhatsAppMessage(client, from, reply);
                     
-                    // 🔥 FIXED: Bot Reply එක DB එකේ හරියටම Save කිරීම
-                    await supabase.from('messages').insert([{ 
+                    // 🔥 FIXED: මේ කොටස තමයි Chat History එකේ Bot Msg එක පෙන්නන්න හදලා තියෙන්නේ
+                    const { error: botInsertErr } = await supabase.from('messages').insert([{ 
                         contact_id: contact.id, 
                         owner_id: client.id, 
-                        text: reply.text || "Bot Reply", 
-                        sender: "me",          // "me" ලෙස සකසා ඇත
-                        direction: "outbound", // outbound ලෙස සකසා ඇත
+                        text: reply.text || "Bot Media", 
+                        sender: "me", 
+                        direction: "outbound", // මේක අනිවාර්යයි Frontend එකට 
                         is_bot_reply: true, 
                         type: reply.mediaType || 'text', 
-                        media_url: reply.media || null, 
                         content: reply.media || null 
                     }]);
+
+                    if (botInsertErr) {
+                        console.log("❌ Bot Message DB Save Error:", botInsertErr.message);
+                    } else {
+                        console.log("✅ Bot Message Saved to Database perfectly!");
+                    }
 
                     await supabase.from('chat_sessions').update({ current_step: session.current_step + 1, last_active: new Date().toISOString() }).eq('id', session.id);
                 } else {
