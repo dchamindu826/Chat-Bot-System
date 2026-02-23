@@ -32,7 +32,7 @@ router.post("/", async (req, res) => {
 
             console.log(`📩 Incoming message from: ${from}`);
 
-            // 1. Client හොයනවා (.single() වෙනුවට .limit(1) දාලා තියෙන්නේ DB එකේ duplicate තිබ්බත් crash නොවෙන්න)
+            // 1. Client හොයනවා 
             const { data: clients, error: clientErr } = await supabase.from('users').select('*').eq('phone_number_id', phone_number_id).limit(1);
             if (clientErr) console.log("⚠️ DB Search Error:", clientErr.message);
             
@@ -45,7 +45,7 @@ router.post("/", async (req, res) => {
 
             let msgBody = msgType === "text" ? msgObj.text.body : `📷 ${msgType} Received`;
 
-            // 2. Contact හොයනවා (.single() ඉවත් කර ඇත)
+            // 2. Contact හොයනවා 
             let { data: contacts } = await supabase.from('contacts').select('*').eq('phone_number', from).eq('owner_id', client.id).limit(1);
             let contact = contacts && contacts.length > 0 ? contacts[0] : null;
             
@@ -64,7 +64,7 @@ router.post("/", async (req, res) => {
                 }).eq('id', contact.id);
             }
 
-            if(!contact) continue; // Safety check
+            if(!contact) continue;
 
             // 3. Customer එවපු Message එක DB එකේ Save කරනවා
             const { error: msgErr } = await supabase.from('messages').insert([{ 
@@ -87,14 +87,12 @@ router.post("/", async (req, res) => {
             
             const botConfig = botConfigs && botConfigs.length > 0 ? botConfigs[0] : null;
             
-            // Debugging සඳහා මොනවද ආවේ කියලා ප්‍රින්ට් කරමු
             console.log("🤖 Found Bot Config:", botConfig ? "Yes" : "No");
             if (botConfig) {
                  console.log("   - is_active:", botConfig.is_active);
                  console.log("   - replies length:", botConfig.replies ? botConfig.replies.length : 0);
             }
             
-            // මෙතන is_active කියලා වෙනස් කළා (Supabase column name එක)
             if (botConfig && botConfig.is_active && botConfig.replies && botConfig.replies.length > 0) {
                 let { data: sessions } = await supabase.from('chat_sessions').select('*').eq('user_id', client.id).eq('phone_number', from).limit(1);
                 let session = sessions && sessions.length > 0 ? sessions[0] : null;
@@ -117,13 +115,16 @@ router.post("/", async (req, res) => {
                     
                     await sendWhatsAppMessage(client, from, reply);
                     
+                    // 🔥 FIXED: Bot Reply එක DB එකේ හරියටම Save කිරීම
                     await supabase.from('messages').insert([{ 
                         contact_id: contact.id, 
                         owner_id: client.id, 
                         text: reply.text || "Bot Reply", 
-                        sender: "me", 
+                        sender: "me",          // "me" ලෙස සකසා ඇත
+                        direction: "outbound", // outbound ලෙස සකසා ඇත
                         is_bot_reply: true, 
                         type: reply.mediaType || 'text', 
+                        media_url: reply.media || null, 
                         content: reply.media || null 
                     }]);
 
@@ -141,7 +142,6 @@ router.post("/", async (req, res) => {
   } catch (err) { console.error("❌ Webhook Fatal Error:", err.message); }
 });
 
-// Meta API එකට මැසේජ් එක යවන Function එක (Media යවන්නත් පුළුවන් විදියට හදලා තියෙන්නේ)
 const sendWhatsAppMessage = async (client, to, replyStep) => {
   try {
     const url = `https://graph.facebook.com/v17.0/${client.phone_number_id}/messages`;
@@ -154,9 +154,8 @@ const sendWhatsAppMessage = async (client, to, replyStep) => {
         to: to 
     };
 
-    // Text එකක්ද Media එකක්ද කියලා බලලා යවනවා
     if (replyStep.mediaType && replyStep.mediaType !== 'text' && replyStep.media) {
-        body.type = replyStep.mediaType; // "image", "video", "document", "audio"
+        body.type = replyStep.mediaType; 
         body[replyStep.mediaType] = { link: replyStep.media };
         if(replyStep.text && replyStep.mediaType !== 'audio') {
             body[replyStep.mediaType].caption = replyStep.text;
