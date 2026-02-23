@@ -1,59 +1,78 @@
 const router = require('express').Router();
-const mongoose = require('mongoose');
-const Message = require('../models/Message');
-const User = require('../models/User');
-const SystemLog = require('../models/SystemLog');
-const Contact = require('../models/Contact');
-const { verifyTokenAndAdmin, verifyToken, verifyTokenAndAuthorization } = require('../verifyToken');
+const supabase = require('../supabase');
+const { verifyTokenAndAdmin, verifyToken } = require('../verifyToken');
 
 // 1. ADMIN OVERVIEW
 router.get('/overview', verifyTokenAndAdmin, async (req, res) => {
   try {
-    const activeClients = await User.countDocuments({ role: 'user' }); 
-    const totalMessages = await Message.countDocuments();
-    const totalErrors = await SystemLog.countDocuments({ type: 'ERROR' });
+    // 1. Get active clients count
+    const { count: activeClients } = await supabase
+        .from('users')
+        .select('*', { count: 'exact', head: true })
+        .eq('role', 'user');
 
+    // 2. Get total messages count
+    const { count: totalMessages } = await supabase
+        .from('messages')
+        .select('*', { count: 'exact', head: true });
+
+    // 3. Get total errors (If table exists)
+    let totalErrors = 0;
+    const { count: errCount, error: errLog } = await supabase
+        .from('system_logs')
+        .select('*', { count: 'exact', head: true })
+        .eq('type', 'ERROR');
+    if (!errLog) totalErrors = errCount;
+
+    // 4. Get last 7 days message chart data
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    const isoDate = sevenDaysAgo.toISOString();
 
-    const messageChart = await Message.aggregate([
-      { $match: { createdAt: { $gte: sevenDaysAgo } } },
-      {
-        $group: {
-          _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
-          count: { $sum: 1 }
-        }
-      },
-      { $sort: { _id: 1 } }
-    ]);
+    const { data: recentMessages } = await supabase
+        .from('messages')
+        .select('created_at')
+        .gte('created_at', isoDate);
+
+    // Group by date locally (since simple query is easier than RPC for this)
+    const dateCounts = {};
+    if (recentMessages) {
+        recentMessages.forEach(msg => {
+            const d = msg.created_at.split('T')[0];
+            dateCounts[d] = (dateCounts[d] || 0) + 1;
+        });
+    }
 
     const chartData = [];
     for (let i = 0; i < 7; i++) {
         const d = new Date();
         d.setDate(d.getDate() - i);
         const dateString = d.toISOString().split('T')[0];
-        const found = messageChart.find(item => item._id === dateString);
-        chartData.push({ name: dateString, messages: found ? found.count : 0 });
+        chartData.push({ name: dateString, messages: dateCounts[dateString] || 0 });
     }
     
     chartData.sort((a, b) => new Date(a.name) - new Date(b.name));
 
-    res.status(200).json({ totalMessages, activeClients, totalErrors, chartData });
-  } catch (err) { res.status(500).json(err); }
+    res.status(200).json({ 
+        totalMessages: totalMessages || 0, 
+        activeClients: activeClients || 0, 
+        totalErrors, 
+        chartData 
+    });
+  } catch (err) { 
+      res.status(500).json({ error: err.message }); 
+  }
 });
 
-// 2. ADMIN LOGS (Supabase විදිහට වෙනස් කර ඇත)
+// 2. ADMIN LOGS
 router.get('/logs', verifyTokenAndAdmin, async (req, res) => {
   try {
-    // Supabase එකේ system_logs table එකක් නැත්නම් Crash නොවී හිස් Array එකක් යවන්න
     const { data: logs, error } = await supabase.from('system_logs')
         .select(`*, clientId:users(id, name, business_name, phone)`)
         .order('created_at', { ascending: false })
         .limit(100);
         
-    if (error) {
-        return res.status(200).json([]); // Table එක නැත්නම් Error නොදී හිස්ව යවනවා
-    }
+    if (error) return res.status(200).json([]);
 
     const formattedLogs = logs.map(log => ({
         _id: log.id,
@@ -71,7 +90,7 @@ router.get('/logs', verifyTokenAndAdmin, async (req, res) => {
 
     res.status(200).json(formattedLogs);
   } catch (err) { 
-      res.status(200).json([]); // 500 error එන එක නවත්වන්න 
+      res.status(200).json([]); 
   }
 });
 
@@ -80,116 +99,115 @@ router.get('/user-stats', verifyToken, async (req, res) => {
   try {
     const { phase } = req.query;
     const ownerId = req.user.id;
-    let filter = { ownerId: ownerId };
     
-    if (phase && phase !== 'All') {
-        filter.phase = parseInt(phase);
-    }
+    // Total Calls
+    let callsQuery = supabase.from('contacts').select('*', { count: 'exact', head: true }).eq('owner_id', ownerId);
+    if (phase && phase !== 'All') callsQuery = callsQuery.eq('phase', parseInt(phase));
+    const { count: totalCalls } = await callsQuery;
 
-    const totalCalls = await Contact.countDocuments(filter);
-    const totalMessages = await Message.countDocuments({ ownerId: req.user.id });
-    const assignedContacts = await Contact.countDocuments({ ...filter, assignedTo: { $ne: null } });
-    const answeredContacts = await Contact.countDocuments({ ...filter, callStatus: 'Answered' });
+    // Total Messages
+    const { count: totalMessages } = await supabase.from('messages').select('*', { count: 'exact', head: true }).eq('owner_id', ownerId);
+
+    // Assigned Contacts
+    let assignedQuery = supabase.from('contacts').select('*', { count: 'exact', head: true }).eq('owner_id', ownerId).not('assigned_to', 'is', null);
+    if (phase && phase !== 'All') assignedQuery = assignedQuery.eq('phase', parseInt(phase));
+    const { count: assignedContacts } = await assignedQuery;
+
+    // Answered Contacts
+    let answeredQuery = supabase.from('contacts').select('*', { count: 'exact', head: true }).eq('owner_id', ownerId).eq('call_status', 'Answered');
+    if (phase && phase !== 'All') answeredQuery = answeredQuery.eq('phase', parseInt(phase));
+    const { count: answeredContacts } = await answeredQuery;
     
     const responseRate = assignedContacts > 0 ? ((answeredContacts / assignedContacts) * 100).toFixed(1) : 0;
 
-    // 🔥 FIX: Sending number only (Percentage handling moved to frontend)
-    res.status(200).json({ totalCalls, totalMessages, responseRate });
-  } catch (err) { res.status(500).json(err); }
+    res.status(200).json({ 
+        totalCalls: totalCalls || 0, 
+        totalMessages: totalMessages || 0, 
+        responseRate 
+    });
+  } catch (err) { 
+      res.status(500).json({ error: err.message }); 
+  }
 });
 
-// 4. AGENT PERFORMANCE (🔥 FIXED: Logic Updated)
+// 4. AGENT PERFORMANCE (🔥 FIXED to use Supabase)
 router.get('/agent-performance', verifyToken, async (req, res) => {
   try {
     const { phase } = req.query;
-    let matchStage = { ownerId: new mongoose.Types.ObjectId(req.user.id) };
+    const ownerId = req.user.id;
 
+    // 1. Get all agents for this owner
+    const { data: agents, error: agentErr } = await supabase
+        .from('users')
+        .select('id, name')
+        .eq('owner_id', ownerId)
+        .eq('role', 'agent');
+        
+    if (agentErr) throw agentErr;
+
+    // 2. Get all contacts for this owner
+    let contactsQuery = supabase.from('contacts').select('assigned_to, call_status, attempt_count').eq('owner_id', ownerId);
     if (phase && phase !== 'All') {
-        matchStage.phase = parseInt(phase);
+        contactsQuery = contactsQuery.eq('phase', parseInt(phase));
     }
+    const { data: contacts, error: contactErr } = await contactsQuery;
+    
+    if (contactErr) throw contactErr;
 
-    const stats = await Contact.aggregate([
-      { $match: matchStage },
-      {
-        $group: {
-          _id: "$assignedTo",
-          totalAllocated: { $sum: 1 },
-          
-          // Count 'Answered'
-          answered: { $sum: { $cond: [{ $eq: ["$callStatus", "Answered"] }, 1, 0] } },
-          
-          // 🔥 FIX: Count 'No Answer' IF status is 'No Answer' OR (Status is 'Pending' BUT Attempts > 0)
-          // මේකෙන් වෙන්නේ Phase මාරු වෙලා Pending වුනත්, කලින් කෝල් කරලා නිසා ඒක No Answer විදිහට ගණන් ගන්නවා.
-          noAnswer: { 
-            $sum: { 
-                $cond: [
-                    { 
-                        $or: [
-                            { $eq: ["$callStatus", "No Answer"] },
-                            { 
-                                $and: [
-                                    { $eq: ["$callStatus", "Pending"] },
-                                    { $gt: [{ $toInt: "$attemptCount" }, 0] } // Check if attempts > 0
-                                ] 
-                            }
-                        ] 
-                    }, 
-                    1, 
-                    0 
-                ] 
-            } 
-          },
+    // 3. Process Logic Locally (Replacement for Mongo Aggregate)
+    const agentStats = {};
+    
+    // Initialize stats for each agent
+    (agents || []).forEach(agent => {
+        agentStats[agent.id] = { id: agent.id, agentName: agent.name, totalAllocated: 0, answered: 0, noAnswer: 0, reject: 0, pending: 0 };
+    });
+    // Add Unassigned Pool
+    agentStats['unassigned'] = { id: null, agentName: "Unassigned Pool", totalAllocated: 0, answered: 0, noAnswer: 0, reject: 0, pending: 0 };
 
-          // Count 'Reject'
-          reject: { $sum: { $cond: [{ $eq: ["$callStatus", "Reject"] }, 1, 0] } },
-          
-          // Count 'Pure Pending' (Attempts == 0)
-          pending: { 
-            $sum: { 
-                $cond: [
-                    { 
-                        $and: [
-                            { $eq: ["$callStatus", "Pending"] },
-                            { $eq: [{ $toInt: "$attemptCount" }, 0] } // Only count if NO attempts made
-                        ] 
-                    }, 
-                    1, 
-                    0 
-                ] 
-            } 
-          }
+    // Calculate Stats
+    (contacts || []).forEach(c => {
+        const agentId = c.assigned_to || 'unassigned';
+        if (!agentStats[agentId]) return; // Fallback if agent deleted
+
+        agentStats[agentId].totalAllocated += 1;
+        const attempts = parseInt(c.attempt_count || 0);
+
+        if (c.call_status === 'Answered') {
+            agentStats[agentId].answered += 1;
+        } else if (c.call_status === 'Reject') {
+            agentStats[agentId].reject += 1;
+        } else if (c.call_status === 'No Answer' || (c.call_status === 'Pending' && attempts > 0)) {
+            // Count 'No Answer' IF status is 'No Answer' OR (Status is 'Pending' BUT Attempts > 0)
+            agentStats[agentId].noAnswer += 1;
+        } else if (c.call_status === 'Pending' && attempts === 0) {
+            agentStats[agentId].pending += 1;
         }
-      },
-      {
-        $lookup: { from: "users", localField: "_id", foreignField: "_id", as: "agentInfo" }
-      },
-      { $unwind: { path: "$agentInfo", preserveNullAndEmptyArrays: true } }
-    ]);
+    });
 
-    const formattedStats = stats.map(stat => {
+    // 4. Format and Calculate derived values (responseRate, toCover)
+    const formattedStats = Object.values(agentStats).map(stat => {
         const responseRate = stat.totalAllocated > 0 ? ((stat.answered / stat.totalAllocated) * 100).toFixed(1) : 0;
         
-        // Auto Calculate 'To Cover' (Assigned - Actions)
-        // දැන් No Answer එකට 'Retries' එකතු වුන නිසා, To Cover එකට එන්නේ තාම කෝල් නොකරපු ටික විතරයි.
+        // Auto Calculate 'To Cover'
         const totalActioned = stat.answered + stat.noAnswer + stat.reject;
         const toCover = stat.totalAllocated - totalActioned;
 
         return {
-            id: stat._id,
-            agentName: stat.agentInfo ? stat.agentInfo.name : "Unassigned Pool",
+            id: stat.id,
+            agentName: stat.agentName,
             totalAllocated: stat.totalAllocated,
             answered: stat.answered,
             noAnswer: stat.noAnswer,
             reject: stat.reject,
-            responseRate: responseRate, // 🔥 FIX: Removed '%' string here
+            responseRate: responseRate, 
             toCover: toCover < 0 ? 0 : toCover
         };
     });
 
     res.status(200).json(formattedStats);
   } catch (err) {
-    console.error(err);
-    res.status(500).json(err);
+    console.error("Agent Performance Error:", err);
+    res.status(500).json({ error: err.message });
   }
 });
 

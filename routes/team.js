@@ -10,7 +10,6 @@ router.post("/add-agent", verifyToken, async (req, res) => {
         return res.status(400).json({ message: "All fields are required!" });
     }
 
-    // Email එක තියෙනවද බලනවා
     const { data: existingUser } = await supabase.from('users').select('id').eq('email', req.body.email).single();
     if (existingUser) return res.status(400).json({ message: "Email already exists!" });
 
@@ -32,7 +31,7 @@ router.post("/add-agent", verifyToken, async (req, res) => {
   }
 });
 
-// 🔥 2. GET AGENTS LIST (WITH CORRECT COUNTS)
+// 🔥 2. GET AGENTS LIST
 router.get("/agents", verifyToken, async (req, res) => {
   try {
     const { data: agents, error: agentErr } = await supabase
@@ -44,15 +43,12 @@ router.get("/agents", verifyToken, async (req, res) => {
     if (agentErr) throw agentErr;
 
     const agentsWithCounts = await Promise.all((agents || []).map(async (agent) => {
-        
-        // 1. Total Assigned
         const { count: totalAssigned } = await supabase
             .from('contacts')
             .select('*', { count: 'exact', head: true })
             .eq('owner_id', req.user.id)
             .eq('assigned_to', agent.id);
 
-        // 2. Covered Count
         const { count: coveredCount } = await supabase
             .from('contacts')
             .select('*', { count: 'exact', head: true })
@@ -76,7 +72,7 @@ router.get("/agents", verifyToken, async (req, res) => {
   }
 });
 
-// 🔥🔥🔥 3. GET SPECIFIC AGENT PERFORMANCE
+// 3. GET SPECIFIC AGENT PERFORMANCE
 router.get("/agent-performance/:id", verifyToken, async (req, res) => {
     try {
         const agentId = req.params.id;
@@ -125,15 +121,16 @@ router.put("/agent/:id", verifyToken, async (req, res) => {
   }
 });
 
-// 5. DELETE AGENT
+// 5. DELETE AGENT (🔥 FIXED Constraint Error)
 router.delete("/agent/:id", verifyToken, async (req, res) => {
   try {
+    // 1. මුලින්ම Agent ට assign වෙලා තියෙන Contacts ටික Unassign කරනවා
+    await supabase.from('contacts').update({ assigned_to: null }).eq('assigned_to', req.params.id);
+    
+    // 2. ඊටපස්සේ User ව මකනවා
     const { error: delErr } = await supabase.from('users').delete().eq('id', req.params.id);
     if (delErr) throw delErr;
 
-    // Unassign contacts
-    await supabase.from('contacts').update({ assigned_to: null }).eq('assigned_to', req.params.id);
-    
     res.status(200).json("Agent has been deleted...");
   } catch (err) {
     res.status(500).json({ message: err.message });
