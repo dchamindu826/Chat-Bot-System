@@ -38,6 +38,12 @@ router.post("/send", verifyToken, async (req, res) => {
         const { data: user, error: userErr } = await supabase.from('users').select('*').eq('id', ownerId).single();
         if (userErr || !user) return res.status(404).json({ message: "User config not found" });
 
+        // 🔥 FIX: phone_number_id එක හරියටම තියෙනවද කියලා බලනවා
+        if (!user.phone_number_id) {
+            console.error("❌ Missing phone_number_id for user:", user.email);
+            return res.status(400).json({ message: "WhatsApp API is not configured for this account. Missing Phone Number ID." });
+        }
+
         // 2. Meta API එකට යවනවා
         const url = `https://graph.facebook.com/v17.0/${user.phone_number_id}/messages`;
         const headers = { Authorization: `Bearer ${user.access_token}`, "Content-Type": "application/json" };

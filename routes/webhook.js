@@ -25,12 +25,18 @@ router.post("/", async (req, res) => {
           if (value.statuses) continue; 
 
           if (value.messages && value.messages.length > 0) {
-            const msgObj = value.messages[0];
-            const from = msgObj.from;
-            const msgType = msgObj.type; 
-            const phone_number_id = value.metadata.phone_number_id;
+    const msgObj = value.messages[0];
+    const from = msgObj.from;
+    const msgType = msgObj.type; 
+    const phone_number_id = value.metadata.phone_number_id;
 
-            console.log(`📩 Incoming message from: ${from}`);
+    // 🔥 FIX 1: අපේම මැසේජ් වලට (echo) රිප්ලයි නොකිරීම සහ Status messages අතහැරීම
+    if (from === phone_number_id || msgObj.is_echo) {
+        console.log("🛑 Webhook Ignored: Echo or Status update from our own bot.");
+        continue;
+    }
+
+    console.log(`📩 Incoming message from: ${from}`);
 
             const { data: clients, error: clientErr } = await supabase.from('users').select('*').eq('phone_number_id', phone_number_id).limit(1);
             if (clientErr) console.log("⚠️ DB Search Error:", clientErr.message);
