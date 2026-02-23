@@ -3,64 +3,88 @@ const axios = require("axios");
 const supabase = require("../supabase");
 const { verifyToken } = require("../verifyToken");
 
+// 1. GET MESSAGES FOR A CONTACT
 router.get("/:contactId", verifyToken, async (req, res) => {
-  try {
-    await supabase.from('contacts').update({ unread_count: 0 }).eq('id', req.params.contactId);
-    
-    const { data: messages, error } = await supabase.from('messages').select('*').eq('contact_id', req.params.contactId).order('created_at', { ascending: true });
-    if (error) throw error;
-    res.status(200).json(messages);
-  } catch (err) {
-    res.status(500).json(err);
-  }
+    try {
+        const { data, error } = await supabase
+            .from('messages')
+            .select('*')
+            .eq('contact_id', req.params.contactId)
+            .order('created_at', { ascending: true });
+
+        if (error) throw error;
+
+        const formattedMessages = data.map(m => ({
+            ...m,
+            _id: m.id,
+            mediaUrl: m.media_url,
+            createdAt: m.created_at
+        }));
+
+        res.status(200).json(formattedMessages);
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
 });
 
+// 2. SEND MESSAGE (From Admin/Agent Dashboard to Meta API)
 router.post("/send", verifyToken, async (req, res) => {
-  const { contactId, to, text, type, mediaUrl } = req.body; 
+    try {
+        const { contactId, to, text, type, mediaUrl } = req.body;
+        const ownerId = req.user.role === 'agent' ? req.user.owner_id || req.user.id : req.user.id;
 
-  try {
-    const { data: contact } = await supabase.from('contacts').select('*').eq('id', contactId).single();
-    if (!contact) return res.status(404).json({ message: "Contact not found" });
+        // 1. Client ගේ API Details ගන්නවා
+        // (මෙතනදී Admin ගේ ID එකෙන් තමයි Meta Phone Number ID එක ගන්නේ)
+        const { data: user, error: userErr } = await supabase.from('users').select('*').eq('id', ownerId).single();
+        if (userErr || !user) return res.status(404).json({ message: "User config not found" });
 
-    const { data: client } = await supabase.from('users').select('*').eq('id', contact.owner_id).single();
-    if (!client || !client.phone_number_id) return res.status(500).json({ message: "Client Config Error" });
+        // 2. Meta API එකට යවනවා
+        const url = `https://graph.facebook.com/v17.0/${user.phone_number_id}/messages`;
+        const headers = { Authorization: `Bearer ${user.access_token}`, "Content-Type": "application/json" };
+        
+        let payload = { messaging_product: "whatsapp", recipient_type: "individual", to: to };
 
-    const url = `https://graph.facebook.com/v17.0/${client.phone_number_id}/messages`;
+        if (type && type !== 'text' && mediaUrl) {
+            payload.type = type;
+            payload[type] = { link: mediaUrl };
+            if(text && type !== 'audio') payload[type].caption = text;
+        } else {
+            payload.type = "text";
+            payload.text = { body: text };
+        }
 
-    let body = { messaging_product: "whatsapp", recipient_type: "individual", to: to };
+        await axios.post(url, payload, { headers });
 
-    if (['image', 'video', 'document', 'audio'].includes(type)) {
-        body.type = type;
-        body[type] = { link: mediaUrl };
-        if (type !== 'audio' && text) body[type].caption = text;
-    } else {
-        body.type = "text";
-        body.text = { body: text };
+        // 3. Database එකේ Save කරනවා
+        const { data: savedMsg, error: saveErr } = await supabase.from('messages').insert([{
+            contact_id: contactId,
+            owner_id: ownerId,
+            text: text || "",
+            sender: "me",
+            direction: "outbound",
+            type: type || "text",
+            media_url: mediaUrl || null
+        }]).select().single();
+
+        if (saveErr) throw saveErr;
+
+        // 4. Contact ගේ අන්තිම මැසේජ් එක Update කරනවා
+        await supabase.from('contacts').update({
+            last_message: text || `Sent a ${type}`,
+            last_message_time: new Date().toISOString()
+        }).eq('id', contactId);
+
+        res.status(200).json({
+            ...savedMsg,
+            _id: savedMsg.id,
+            mediaUrl: savedMsg.media_url,
+            createdAt: savedMsg.created_at
+        });
+
+    } catch (err) {
+        console.error("Message Send Error:", err.response ? err.response.data : err.message);
+        res.status(500).json({ message: err.message });
     }
-
-    await axios.post(url, body, {
-      headers: { Authorization: `Bearer ${client.access_token}`, "Content-Type": "application/json" }
-    });
-
-    const { data: newMessage } = await supabase.from('messages').insert([{
-        contact_id: contactId,
-        text: text || "Media File", 
-        type: type || "text",
-        sender: "me",
-        owner_id: contact.owner_id, 
-        direction: "outbound",
-        media_url: mediaUrl
-    }]).select().single();
-
-    await supabase.from('contacts').update({
-        last_message: text || `Sent ${type}`,
-        last_message_time: new Date().toISOString()
-    }).eq('id', contactId);
-
-    res.status(200).json(newMessage);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
 });
 
 module.exports = router;

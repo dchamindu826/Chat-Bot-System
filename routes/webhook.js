@@ -32,7 +32,6 @@ router.post("/", async (req, res) => {
 
             console.log(`📩 Incoming message from: ${from}`);
 
-            // 1. Client හොයනවා 
             const { data: clients, error: clientErr } = await supabase.from('users').select('*').eq('phone_number_id', phone_number_id).limit(1);
             if (clientErr) console.log("⚠️ DB Search Error:", clientErr.message);
             
@@ -45,7 +44,6 @@ router.post("/", async (req, res) => {
 
             let msgBody = msgType === "text" ? msgObj.text.body : `📷 ${msgType} Received`;
 
-            // 2. Contact හොයනවා 
             let { data: contacts } = await supabase.from('contacts').select('*').eq('phone_number', from).eq('owner_id', client.id).limit(1);
             let contact = contacts && contacts.length > 0 ? contacts[0] : null;
             
@@ -66,7 +64,6 @@ router.post("/", async (req, res) => {
 
             if(!contact) continue;
 
-            // 3. Customer එවපු Message එක DB එකේ Save කරනවා
             const { error: msgErr } = await supabase.from('messages').insert([{ 
                 contact_id: contact.id, 
                 owner_id: client.id, 
@@ -78,7 +75,6 @@ router.post("/", async (req, res) => {
             if (msgErr) console.log("❌ Webhook Message Error:", msgErr);
             else console.log("✅ Webhook Message Saved Successfully!");
 
-            // 4. Bot Auto Reply Logic
             const { data: botConfigs, error: botErr } = await supabase.from('bot_configs').select('*').eq('owner_id', client.id).limit(1);
             
             if (botErr) {
@@ -88,10 +84,6 @@ router.post("/", async (req, res) => {
             const botConfig = botConfigs && botConfigs.length > 0 ? botConfigs[0] : null;
             
             console.log("🤖 Found Bot Config:", botConfig ? "Yes" : "No");
-            if (botConfig) {
-                 console.log("   - is_active:", botConfig.is_active);
-                 console.log("   - replies length:", botConfig.replies ? botConfig.replies.length : 0);
-            }
             
             if (botConfig && botConfig.is_active && botConfig.replies && botConfig.replies.length > 0) {
                 let { data: sessions } = await supabase.from('chat_sessions').select('*').eq('user_id', client.id).eq('phone_number', from).limit(1);
@@ -115,16 +107,16 @@ router.post("/", async (req, res) => {
                     
                     await sendWhatsAppMessage(client, from, reply);
                     
-                    // 🔥 FIXED: මේ කොටස තමයි Chat History එකේ Bot Msg එක පෙන්නන්න හදලා තියෙන්නේ
+                    // 🔥 FIXED: 'content' column එක අයින් කර 'media_url' පමණක් භාවිතා කිරීම
                     const { error: botInsertErr } = await supabase.from('messages').insert([{ 
                         contact_id: contact.id, 
                         owner_id: client.id, 
                         text: reply.text || "Bot Media", 
                         sender: "me", 
-                        direction: "outbound", // මේක අනිවාර්යයි Frontend එකට 
+                        direction: "outbound", 
                         is_bot_reply: true, 
                         type: reply.mediaType || 'text', 
-                        content: reply.media || null 
+                        media_url: reply.media || null 
                     }]);
 
                     if (botInsertErr) {
