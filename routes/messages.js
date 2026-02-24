@@ -3,7 +3,7 @@ const axios = require("axios");
 const supabase = require("../supabase");
 const { verifyToken } = require("../verifyToken");
 
-// 1. GET MESSAGES FOR A CONTACT
+// 1. GET MESSAGES
 router.get("/:contactId", verifyToken, async (req, res) => {
     try {
         const { data, error } = await supabase
@@ -13,7 +13,8 @@ router.get("/:contactId", verifyToken, async (req, res) => {
             .order('created_at', { ascending: true });
 
         if (error) throw error;
-
+        
+        // Frontend එකට ගැලපෙන ලෙස map කිරීම
         const formattedMessages = data.map(m => ({
             ...m,
             _id: m.id,
@@ -27,41 +28,43 @@ router.get("/:contactId", verifyToken, async (req, res) => {
     }
 });
 
-// 2. SEND MESSAGE (From Admin/Agent Dashboard to Meta API)
+// 2. SEND MESSAGE
 router.post("/send", verifyToken, async (req, res) => {
     try {
         const { contactId, to, text, type, mediaUrl } = req.body;
-        const ownerId = req.user.role === 'agent' ? req.user.owner_id || req.user.id : req.user.id;
+        
+        // Agent නම් Owner ගේ ID එක ගන්න, නැත්නම් තමන්ගේම ID එක
+        const ownerId = req.user.role === 'agent' && req.user.owner_id ? req.user.owner_id : req.user.id;
 
-        // 1. Client ගේ API Details ගන්නවා
-        // (මෙතනදී Admin ගේ ID එකෙන් තමයි Meta Phone Number ID එක ගන්නේ)
+        // Owner ගේ විස්තර ගන්න (Phone ID, Access Token)
         const { data: user, error: userErr } = await supabase.from('users').select('*').eq('id', ownerId).single();
-        if (userErr || !user) return res.status(404).json({ message: "User config not found" });
+        
+        if (userErr || !user) return res.status(404).json({ message: "Owner config not found" });
 
-        // 🔥 FIX: phone_number_id එක හරියටම තියෙනවද කියලා බලනවා
         if (!user.phone_number_id) {
-            console.error("❌ Missing phone_number_id for user:", user.email);
-            return res.status(400).json({ message: "WhatsApp API is not configured for this account. Missing Phone Number ID." });
+            return res.status(400).json({ message: "WhatsApp API not configured. Missing Phone Number ID." });
         }
 
-        // 2. Meta API එකට යවනවා
         const url = `https://graph.facebook.com/v17.0/${user.phone_number_id}/messages`;
         const headers = { Authorization: `Bearer ${user.access_token}`, "Content-Type": "application/json" };
         
         let payload = { messaging_product: "whatsapp", recipient_type: "individual", to: to };
 
+        // Attachments/Voice Handling
         if (type && type !== 'text' && mediaUrl) {
             payload.type = type;
             payload[type] = { link: mediaUrl };
+            // Audio වලට caption දාන්න බෑ, අනිත් ඒවාට පුළුවන්
             if(text && type !== 'audio') payload[type].caption = text;
         } else {
             payload.type = "text";
             payload.text = { body: text };
         }
 
+        // Meta API වෙත යැවීම
         await axios.post(url, payload, { headers });
 
-        // 3. Database එකේ Save කරනවා
+        // Database එකේ Save කිරීම
         const { data: savedMsg, error: saveErr } = await supabase.from('messages').insert([{
             contact_id: contactId,
             owner_id: ownerId,
@@ -74,7 +77,7 @@ router.post("/send", verifyToken, async (req, res) => {
 
         if (saveErr) throw saveErr;
 
-        // 4. Contact ගේ අන්තිම මැසේජ් එක Update කරනවා
+        // Contact Update (Last message)
         await supabase.from('contacts').update({
             last_message: text || `Sent a ${type}`,
             last_message_time: new Date().toISOString()
@@ -88,8 +91,8 @@ router.post("/send", verifyToken, async (req, res) => {
         });
 
     } catch (err) {
-        console.error("Message Send Error:", err.response ? err.response.data : err.message);
-        res.status(500).json({ message: err.message });
+        console.error("Send Error:", err.response ? err.response.data : err.message);
+        res.status(500).json({ message: "Failed to send message via WhatsApp API" });
     }
 });
 
