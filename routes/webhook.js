@@ -23,25 +23,32 @@ router.post("/", async (req, res) => {
     if (body.object === "whatsapp_business_account") {
       for (const entry of body.entry) {
         for (const change of entry.changes) {
-          const value = change.value;
-          
-          // Status updates (sent, delivered, read) නොසලකා හරින්න
-          if (value.statuses) continue; 
+    const value = change.value;
+    
+    // 🔥 අලුතින් එකතු කළ කොටස: Status updates චෙක් කරලා Error එකක් තියෙනවා නම් Log කරනවා
+    if (value.statuses) {
+        const status = value.statuses[0];
+        // මැසේජ් එක යවන්න බැරි වුණා නම් (failed), ඒ ඇයි කියලා log කරනවා
+        if (status.status === 'failed' && status.errors) {
+            console.error("❌ WhatsApp Voice/Media Delivery Failed:", JSON.stringify(status.errors, null, 2));
+        }
+        continue; // අනිත් සාමාන්‍ය status updates (sent, delivered) අතහැර දමන්න
+    }
 
-          if (value.messages && value.messages.length > 0) {
-            const msgObj = value.messages[0];
-            const from = msgObj.from; // Customer Number
-            const msgType = msgObj.type; 
-            const phone_number_id = value.metadata.phone_number_id; // Bot ID
-            const display_phone_number = value.metadata.display_phone_number; // Bot Number
+    if (value.messages && value.messages.length > 0) {
+        const msgObj = value.messages[0];
+        const from = msgObj.from; // Customer Number
+        const msgType = msgObj.type; 
+        const phone_number_id = value.metadata.phone_number_id; // Bot ID
+        const display_phone_number = value.metadata.display_phone_number; // Bot Number
 
-            // 🔥 FIX: Bot ගේ නම්බර් එක සහ Customer ගේ නම්බර් එක සමාන නම් නවත්වන්න
-            // (Bot තමන්ටම Reply කරගැනීම වැළැක්වීමට)
-            const sanitizedBotNum = display_phone_number ? display_phone_number.replace(/\D/g, '') : '';
-            if (from === sanitizedBotNum) {
-                console.log("🛑 Webhook Ignored: Message from Bot's own number.");
-                continue;
-            }
+        // 🔥 FIX: Bot ගේ නම්බර් එක සහ Customer ගේ නම්බර් එක සමාන නම් නවත්වන්න
+        // (Bot තමන්ටම Reply කරගැනීම වැළැක්වීමට)
+        const sanitizedBotNum = display_phone_number ? display_phone_number.replace(/\D/g, '') : '';
+        if (from === sanitizedBotNum) {
+            console.log("🛑 Webhook Ignored: Message from Bot's own number.");
+            continue;
+        }
 
             console.log(`📩 Incoming message from: ${from}`);
 
