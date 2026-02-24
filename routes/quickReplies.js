@@ -1,40 +1,52 @@
 const router = require("express").Router();
-const QuickReply = require("../models/QuickReply");
+const supabase = require("../supabase");
 const { verifyToken } = require("../verifyToken");
 
 // 1. CREATE NEW QUICK REPLY
 router.post("/add", verifyToken, async (req, res) => {
   try {
-    const newReply = new QuickReply({
-      userId: req.user.id, // Log වෙලා ඉන්න කෙනාගේ ID එක
-      title: req.body.title,
-      message: req.body.message
-    });
+    const { title, message } = req.body;
+    
+    let ownerId = req.user.id;
+    if (req.user.role === 'agent') {
+        const { data: agentData } = await supabase.from('users').select('owner_id').eq('id', req.user.id).single();
+        if (agentData && agentData.owner_id) ownerId = agentData.owner_id;
+    }
 
-    const savedReply = await newReply.save();
-    res.status(200).json(savedReply);
+    const { data, error } = await supabase.from('quick_replies').insert([{
+        user_id: String(ownerId), 
+        title: title,
+        message: message
+    }]).select();
+
+    if (error) throw error;
+    res.status(200).json(data[0]);
   } catch (err) {
-    res.status(500).json(err);
+    console.error("Quick Reply Add Error:", err);
+    res.status(500).json({ message: err.message });
   }
 });
 
-// 2. GET MY QUICK REPLIES (Logged In User ගේ ඒවා විතරයි)
+// 2. GET MY QUICK REPLIES
 router.get("/my", verifyToken, async (req, res) => {
   try {
-    const replies = await QuickReply.find({ userId: req.user.id }).sort({ createdAt: -1 });
-    res.status(200).json(replies);
-  } catch (err) {
-    res.status(500).json(err);
-  }
-});
+    let ownerId = req.user.id;
+    if (req.user.role === 'agent') {
+        const { data: agentData } = await supabase.from('users').select('owner_id').eq('id', req.user.id).single();
+        if (agentData && agentData.owner_id) ownerId = agentData.owner_id;
+    }
 
-// 3. DELETE QUICK REPLY
-router.delete("/:id", verifyToken, async (req, res) => {
-  try {
-    await QuickReply.findByIdAndDelete(req.params.id);
-    res.status(200).json("Quick Reply has been deleted...");
+    const { data, error } = await supabase
+        .from('quick_replies')
+        .select('*')
+        .eq('user_id', String(ownerId))
+        .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    res.status(200).json(data);
   } catch (err) {
-    res.status(500).json(err);
+    console.error("Quick Reply Fetch Error:", err);
+    res.status(500).json({ message: err.message });
   }
 });
 

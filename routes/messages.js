@@ -28,21 +28,30 @@ router.get("/:contactId", verifyToken, async (req, res) => {
     }
 });
 
-// 2. SEND MESSAGE
+  // 2. SEND MESSAGE
 router.post("/send", verifyToken, async (req, res) => {
     try {
         const { contactId, to, text, type, mediaUrl } = req.body;
         
-        // Agent නම් Owner ගේ ID එක ගන්න, නැත්නම් තමන්ගේම ID එක
-        const ownerId = req.user.role === 'agent' && req.user.owner_id ? req.user.owner_id : req.user.id;
+        let ownerId = req.user.id; // මුලින්ම ලොග් වූ කෙනාගේ ID එක ගන්නවා
 
-        // Owner ගේ විස්තර ගන්න (Phone ID, Access Token)
+        // කෙනා Agent කෙනෙක් නම්, Database එකෙන් එයාගේ Owner ව හොයාගන්නවා
+        if (req.user.role === 'agent') {
+            const { data: agentData, error: agentErr } = await supabase.from('users').select('owner_id').eq('id', req.user.id).single();
+            if (agentData && agentData.owner_id) {
+                ownerId = agentData.owner_id;
+            } else {
+                return res.status(400).json({ message: "Agent setup is incomplete: owner_id not found." });
+            }
+        }
+
+        // දැන් Owner ගේ විස්තර ගන්න (Phone ID, Access Token)
         const { data: user, error: userErr } = await supabase.from('users').select('*').eq('id', ownerId).single();
         
         if (userErr || !user) return res.status(404).json({ message: "Owner config not found" });
 
         if (!user.phone_number_id) {
-            return res.status(400).json({ message: "WhatsApp API not configured. Missing Phone Number ID." });
+            return res.status(400).json({ message: "WhatsApp API is not configured. Missing Phone Number ID." });
         }
 
         const url = `https://graph.facebook.com/v17.0/${user.phone_number_id}/messages`;
@@ -50,11 +59,9 @@ router.post("/send", verifyToken, async (req, res) => {
         
         let payload = { messaging_product: "whatsapp", recipient_type: "individual", to: to };
 
-        // Attachments/Voice Handling
         if (type && type !== 'text' && mediaUrl) {
             payload.type = type;
             payload[type] = { link: mediaUrl };
-            // Audio වලට caption දාන්න බෑ, අනිත් ඒවාට පුළුවන්
             if(text && type !== 'audio') payload[type].caption = text;
         } else {
             payload.type = "text";
@@ -62,7 +69,7 @@ router.post("/send", verifyToken, async (req, res) => {
         }
 
         // Meta API වෙත යැවීම
-        await axios.post(url, payload, { headers });
+        const metaRes = await axios.post(url, payload, { headers });
 
         // Database එකේ Save කිරීම
         const { data: savedMsg, error: saveErr } = await supabase.from('messages').insert([{
@@ -77,7 +84,7 @@ router.post("/send", verifyToken, async (req, res) => {
 
         if (saveErr) throw saveErr;
 
-        // Contact Update (Last message)
+        // Contact Update
         await supabase.from('contacts').update({
             last_message: text || `Sent a ${type}`,
             last_message_time: new Date().toISOString()
@@ -91,8 +98,8 @@ router.post("/send", verifyToken, async (req, res) => {
         });
 
     } catch (err) {
-        console.error("Send Error:", err.response ? err.response.data : err.message);
-        res.status(500).json({ message: "Failed to send message via WhatsApp API" });
+        console.error("Send Error:", err.response ? JSON.stringify(err.response.data) : err.message);
+        res.status(400).json({ message: "Failed to send message", error: err.response ? err.response.data : err.message });
     }
 });
 
