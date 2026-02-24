@@ -3,7 +3,7 @@ const axios = require("axios");
 const supabase = require("../supabase");
 const { verifyToken } = require("../verifyToken");
 
-// 1. GET MESSAGES
+// 1. GET MESSAGES FOR A CONTACT
 router.get("/:contactId", verifyToken, async (req, res) => {
     try {
         const { data, error } = await supabase
@@ -13,8 +13,7 @@ router.get("/:contactId", verifyToken, async (req, res) => {
             .order('created_at', { ascending: true });
 
         if (error) throw error;
-        
-        // Frontend එකට ගැලපෙන ලෙස map කිරීම
+
         const formattedMessages = data.map(m => ({
             ...m,
             _id: m.id,
@@ -28,34 +27,46 @@ router.get("/:contactId", verifyToken, async (req, res) => {
     }
 });
 
-  // 2. SEND MESSAGE
+// 2. SEND MESSAGE
 router.post("/send", verifyToken, async (req, res) => {
     try {
         const { contactId, to, text, type, mediaUrl } = req.body;
         
-        let ownerId = req.user.id; // මුලින්ම ලොග් වූ කෙනාගේ ID එක ගන්නවා
+        let ownerId = req.user.id; // මුලින්ම ලොග් වූ කෙනාගේ (Agent හෝ Admin) ID එක ගන්නවා
 
-        // කෙනා Agent කෙනෙක් නම්, Database එකෙන් එයාගේ Owner ව හොයාගන්නවා
-        if (req.user.role === 'agent') {
-            const { data: agentData, error: agentErr } = await supabase.from('users').select('owner_id').eq('id', req.user.id).single();
+        // 🔥 ලොග් වී සිටින්නේ Agent කෙනෙක් නම්, Database එකෙන් ඔහුගේ Owner ව සොයාගැනීම
+        if (req.user.role && req.user.role.toLowerCase() === 'agent') {
+            const { data: agentData, error: agentErr } = await supabase
+                .from('users')
+                .select('owner_id')
+                .eq('id', req.user.id)
+                .single();
+                
             if (agentData && agentData.owner_id) {
-                ownerId = agentData.owner_id;
+                ownerId = agentData.owner_id; // Owner ගේ ID එකට මාරු කරනවා
             } else {
-                return res.status(400).json({ message: "Agent setup is incomplete: owner_id not found." });
+                console.log("❌ Agent lacks owner_id:", req.user.email);
+                return res.status(400).json({ message: "Agent setup incomplete: owner_id not found." });
             }
         }
 
-        // දැන් Owner ගේ විස්තර ගන්න (Phone ID, Access Token)
-        const { data: user, error: userErr } = await supabase.from('users').select('*').eq('id', ownerId).single();
+        // 🔥 දැන් Owner ගේ WhatsApp විස්තර ගන්නවා (Admin ගේ phone_number_id)
+        const { data: ownerUser, error: ownerErr } = await supabase
+            .from('users')
+            .select('*')
+            .eq('id', ownerId)
+            .single();
         
-        if (userErr || !user) return res.status(404).json({ message: "Owner config not found" });
+        if (ownerErr || !ownerUser) return res.status(404).json({ message: "Owner config not found" });
 
-        if (!user.phone_number_id) {
+        if (!ownerUser.phone_number_id) {
+            console.error(`❌ Missing phone_number_id for Owner: ${ownerUser.email}`);
             return res.status(400).json({ message: "WhatsApp API is not configured. Missing Phone Number ID." });
         }
 
-        const url = `https://graph.facebook.com/v17.0/${user.phone_number_id}/messages`;
-        const headers = { Authorization: `Bearer ${user.access_token}`, "Content-Type": "application/json" };
+        // Meta API වෙත යැවීම
+        const url = `https://graph.facebook.com/v17.0/${ownerUser.phone_number_id}/messages`;
+        const headers = { Authorization: `Bearer ${ownerUser.access_token}`, "Content-Type": "application/json" };
         
         let payload = { messaging_product: "whatsapp", recipient_type: "individual", to: to };
 
@@ -68,13 +79,12 @@ router.post("/send", verifyToken, async (req, res) => {
             payload.text = { body: text };
         }
 
-        // Meta API වෙත යැවීම
-        const metaRes = await axios.post(url, payload, { headers });
+        await axios.post(url, payload, { headers });
 
         // Database එකේ Save කිරීම
         const { data: savedMsg, error: saveErr } = await supabase.from('messages').insert([{
             contact_id: contactId,
-            owner_id: ownerId,
+            owner_id: ownerId, // මැසේජ් එක අයිති Owner ට
             text: text || "",
             sender: "me",
             direction: "outbound",
@@ -98,8 +108,8 @@ router.post("/send", verifyToken, async (req, res) => {
         });
 
     } catch (err) {
-        console.error("Send Error:", err.response ? JSON.stringify(err.response.data) : err.message);
-        res.status(400).json({ message: "Failed to send message", error: err.response ? err.response.data : err.message });
+        console.error("Send Error:", err.response ? err.response.data : err.message);
+        res.status(500).json({ message: err.message });
     }
 });
 
