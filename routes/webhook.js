@@ -105,32 +105,36 @@ router.post("/", async (req, res) => {
                             continue;
                         }
 
-                        let msgBody = "";
+                        let msgText = ""; // Chat Bubble එකේ පෙන්නන Text එක
+                        let lastMessageText = ""; // වම් පැත්තේ Sidebar එකේ පෙන්නන Text එක
                         let finalMediaUrl = null;
 
                         // 🔴 Customer එවන Media එක අල්ලගන්න තැන 🔴
                         if (msgType === "text") {
-                            msgBody = msgObj.text.body;
+                            msgText = msgObj.text.body;
+                            lastMessageText = msgText;
                         } else if (["image", "video", "audio", "document", "sticker"].includes(msgType)) {
-                            // Media object එක ගන්නවා (msgObj.image, msgObj.video වගේ)
                             const mediaObj = msgObj[msgType];
                             const mediaId = mediaObj.id;
                             
-                            // Caption එකක් තියෙනවා නම් ගන්නවා
-                            msgBody = mediaObj.caption || `📷 ${msgType} Received`;
+                            // 🔥 FIX: Caption එකක් නැත්නම් Chat එකට Text එකක් දාන්නේ නෑ ("" හිස් කරනවා)
+                            msgText = mediaObj.caption || ""; 
+                            
+                            // 🔥 FIX: වම් පැත්තේ List එකේ ලස්සනට පේන්න අයිකන් එකක් දානවා
+                            const icons = { image: "📷 Image", video: "🎥 Video", audio: "🎤 Voice Note", document: "📄 Document", sticker: "🎭 Sticker" };
+                            lastMessageText = mediaObj.caption || icons[msgType] || `📎 Attachment`;
 
                             console.log(`⏳ Downloading customer ${msgType}...`);
                             
-                            // Meta එකෙන් URL එක ගන්නවා
                             const metaMediaUrl = await getMediaUrlFromMeta(mediaId, client.access_token);
                             
                             if (metaMediaUrl) {
-                                // Cloudinary එකට Upload කරලා ස්ථිර URL එක ගන්නවා
                                 finalMediaUrl = await uploadMediaToCloudinary(metaMediaUrl, client.access_token);
                                 console.log(`✅ Uploaded to Cloudinary: ${finalMediaUrl}`);
                             }
                         } else {
-                            msgBody = `📷 ${msgType} Received`;
+                            msgText = "";
+                            lastMessageText = `📎 ${msgType}`;
                         }
 
                         let { data: contacts } = await supabase.from('contacts').select('*').eq('phone_number', from).eq('owner_id', client.id).limit(1);
@@ -143,7 +147,7 @@ router.post("/", async (req, res) => {
                             contact = newContacts && newContacts.length > 0 ? newContacts[0] : null;
                         } else {
                             await supabase.from('contacts').update({
-                                last_message: msgBody,
+                                last_message: lastMessageText, // 🔥 Sidebar එකට Last Message එක යවනවා
                                 last_message_time: new Date().toISOString(),
                                 unread_count: (contact.unread_count || 0) + 1
                             }).eq('id', contact.id);
@@ -151,14 +155,14 @@ router.post("/", async (req, res) => {
 
                         if (!contact) continue;
 
-                        // 🔴 Database එකට Media URL එක Save කරන තැන 🔴
+                        // 🔴 Database එකට Message එක Save කරන තැන 🔴
                         await supabase.from('messages').insert([{
                             contact_id: contact.id,
                             owner_id: client.id,
-                            text: msgBody,
+                            text: msgText, // 🔥 මෙතනට එන්නේ "" (හිස්) අගයක් නිසා දැන් බොරු වචන වැටෙන්නේ නෑ
                             sender: "customer",
                             type: msgType,
-                            media_url: finalMediaUrl // මෙතනට අලුත් URL එක එනවා
+                            media_url: finalMediaUrl 
                         }]);
 
                         // Bot Logic...
