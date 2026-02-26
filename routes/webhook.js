@@ -105,22 +105,22 @@ router.post("/", async (req, res) => {
                             continue;
                         }
 
-                        let msgText = ""; // Chat Bubble එකේ පෙන්නන Text එක
-                        let lastMessageText = ""; // වම් පැත්තේ Sidebar එකේ පෙන්නන Text එක
+                        let msgBody = ""; // 🔥 FIX: msgText වෙනුවට ආපහු msgBody ම දැම්මා
+                        let lastMessageText = ""; 
                         let finalMediaUrl = null;
 
                         // 🔴 Customer එවන Media එක අල්ලගන්න තැන 🔴
                         if (msgType === "text") {
-                            msgText = msgObj.text.body;
-                            lastMessageText = msgText;
+                            msgBody = msgObj.text.body;
+                            lastMessageText = msgBody;
                         } else if (["image", "video", "audio", "document", "sticker"].includes(msgType)) {
                             const mediaObj = msgObj[msgType];
                             const mediaId = mediaObj.id;
                             
-                            // 🔥 FIX: Caption එකක් නැත්නම් Chat එකට Text එකක් දාන්නේ නෑ ("" හිස් කරනවා)
-                            msgText = mediaObj.caption || ""; 
+                            // Caption එකක් නැත්නම් Chat එකට Text එකක් දාන්නේ නෑ ("" හිස් කරනවා)
+                            msgBody = mediaObj.caption || ""; 
                             
-                            // 🔥 FIX: වම් පැත්තේ List එකේ ලස්සනට පේන්න අයිකන් එකක් දානවා
+                            // වම් පැත්තේ List එකේ ලස්සනට පේන්න අයිකන් එකක් දානවා
                             const icons = { image: "📷 Image", video: "🎥 Video", audio: "🎤 Voice Note", document: "📄 Document", sticker: "🎭 Sticker" };
                             lastMessageText = mediaObj.caption || icons[msgType] || `📎 Attachment`;
 
@@ -133,7 +133,7 @@ router.post("/", async (req, res) => {
                                 console.log(`✅ Uploaded to Cloudinary: ${finalMediaUrl}`);
                             }
                         } else {
-                            msgText = "";
+                            msgBody = "";
                             lastMessageText = `📎 ${msgType}`;
                         }
 
@@ -147,7 +147,7 @@ router.post("/", async (req, res) => {
                             contact = newContacts && newContacts.length > 0 ? newContacts[0] : null;
                         } else {
                             await supabase.from('contacts').update({
-                                last_message: lastMessageText, // 🔥 Sidebar එකට Last Message එක යවනවා
+                                last_message: lastMessageText, // Sidebar එකට Last Message එක යවනවා
                                 last_message_time: new Date().toISOString(),
                                 unread_count: (contact.unread_count || 0) + 1
                             }).eq('id', contact.id);
@@ -159,7 +159,7 @@ router.post("/", async (req, res) => {
                         await supabase.from('messages').insert([{
                             contact_id: contact.id,
                             owner_id: client.id,
-                            text: msgText, // 🔥 මෙතනට එන්නේ "" (හිස්) අගයක් නිසා දැන් බොරු වචන වැටෙන්නේ නෑ
+                            text: msgBody, // මෙතනට එන්නේ "" (හිස්) අගයක් නිසා දැන් බොරු වචන වැටෙන්නේ නෑ
                             sender: "customer",
                             type: msgType,
                             media_url: finalMediaUrl 
