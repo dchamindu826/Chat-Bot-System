@@ -7,7 +7,11 @@ const SESSION_TIMEOUT = 3 * 24 * 60 * 60 * 1000;
 const CLOUD_NAME = "dyixoaldi";
 const UPLOAD_PRESET = "Chat Bot System";
 
-// Webhook Verification
+// 🔥 1. ANTI-LOOP CACHE: එකම Message ID එක දෙපාරක් එන එක නවත්වන්න
+const processedMessageIds = new Set();
+// 🔥 2. COOLDOWN TIMER: තත්පර 5ක් ඇතුළත එකම නම්බර් එකෙන් එන මැසේජ් නවත්වන්න
+const userCooldowns = new Map();
+
 router.get("/", (req, res) => {
     const mode = req.query["hub.mode"];
     const token = req.query["hub.verify_token"];
@@ -20,7 +24,6 @@ router.get("/", (req, res) => {
     }
 });
 
-// Meta එකෙන් Media URL එක ගන්න Function එක
 const getMediaUrlFromMeta = async (mediaId, accessToken) => {
     try {
         const response = await axios.get(`https://graph.facebook.com/v17.0/${mediaId}`, {
@@ -28,44 +31,35 @@ const getMediaUrlFromMeta = async (mediaId, accessToken) => {
         });
         return response.data.url;
     } catch (err) {
-        console.error("❌ Fetch Media URL Error:", err.message);
         return null;
     }
 };
 
-// Meta එකෙන් Media Download කරලා Cloudinary එකට Upload කරන Function එක
 const uploadMediaToCloudinary = async (mediaUrl, accessToken) => {
     try {
-        // Meta එකෙන් File එක ගන්නවා
         const response = await axios.get(mediaUrl, {
             headers: { Authorization: `Bearer ${accessToken}` },
-            responseType: 'arraybuffer' // Binary විදිහට ගන්නවා
+            responseType: 'arraybuffer' 
         });
 
-        // Cloudinary එකට යවන්න Form Data හදනවා
         const formData = new FormData();
         const buffer = Buffer.from(response.data, 'binary');
         
-        // Mime Type එකෙන් extension එක අනුමාන කිරීම (Cloudinary ඔටෝ manage කරනවා ගොඩක් වෙලාවට)
         formData.append("file", buffer, { filename: "downloaded_media" });
         formData.append("upload_preset", UPLOAD_PRESET);
 
-        // Cloudinary එකට Upload කරනවා
         const cloudRes = await axios.post(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/auto/upload`, formData, {
-            headers: {
-                ...formData.getHeaders()
-            }
+            headers: { ...formData.getHeaders() }
         });
 
         return cloudRes.data.secure_url;
-
     } catch (error) {
-        console.error("❌ Cloudinary Upload Error:", error.message);
         return null;
     }
 };
 
 router.post("/", async (req, res) => {
+    // Meta එකට ඉක්මනින් 200 OK යවන්න (නැත්නම් ඒගොල්ලෝ දිගටම Retry කරනවා)
     res.status(200).send("EVENT_RECEIVED");
 
     try {
@@ -75,68 +69,84 @@ router.post("/", async (req, res) => {
                 for (const change of entry.changes) {
                     const value = change.value;
 
-                    if (value.statuses) {
-                        const status = value.statuses[0];
-                        if (status.status === 'failed' && status.errors) {
-                            console.error("❌ WhatsApp Voice/Media Delivery Failed:", JSON.stringify(status.errors, null, 2));
-                        }
-                        continue;
-                    }
+                    // 🔥 ඉතා වැදගත්: Status Updates (Delivery reports, Echoes) මඟ හරින්න
+                    if (value.statuses) continue;
 
                     if (value.messages && value.messages.length > 0) {
                         const msgObj = value.messages[0];
-                        const from = msgObj.from;
-                        const msgType = msgObj.type;
-                        const phone_number_id = value.metadata.phone_number_id;
-                        const display_phone_number = value.metadata.display_phone_number;
+                        const msgId = msgObj.id; 
+                        const from = msgObj.from; 
 
+                        // 🛑 BLOCK 1: එකම මැසේජ් එක දෙපාරක් ආවොත් නවත්වන්න
+                        if (msgId && processedMessageIds.has(msgId)) {
+                            console.log(`🛑 Blocked Meta Retry ID: ${msgId}`);
+                            continue;
+                        }
+                        if (msgId) {
+                            processedMessageIds.add(msgId);
+                            setTimeout(() => processedMessageIds.delete(msgId), 10 * 60 * 1000);
+                        }
+
+                        // 🛑 BLOCK 2: Cooldown Timer (තත්පර 5ක් ඇතුළත ආයේ ආවොත් නවත්වන්න)
+                        const now = Date.now();
+                        const lastActivity = userCooldowns.get(from) || 0;
+                        if (now - lastActivity < 5000) {
+                            console.log(`🛑 Blocked by Cooldown Timer for ${from}.`);
+                            continue;
+                        }
+                        userCooldowns.set(from, now);
+
+                        const msgType = msgObj.type; 
+                        const phone_number_id = value.metadata.phone_number_id; 
+                        const display_phone_number = value.metadata.display_phone_number; 
+
+                        // 🛑 BLOCK 3: Bot ගේම අංකයෙන් එන ඒවට (Echoes) Auto Reply යන එක නවත්වන්න
                         const sanitizedBotNum = display_phone_number ? display_phone_number.replace(/\D/g, '') : '';
-                        if (from === sanitizedBotNum) {
+                        if (from === sanitizedBotNum || (sanitizedBotNum && from.includes(sanitizedBotNum))) {
+                            continue;
+                        }
+
+                        // 🛑 BLOCK 4: System සහ Unknown Type Messages වලට Auto Reply යවන්න එපා (Templates යනකොට එන්නේ මේවා)
+                        if (msgType === 'system' || msgType === 'unknown' || msgType === 'unsupported') {
                             continue;
                         }
 
                         console.log(`📩 Incoming message from: ${from}`);
 
-                        const { data: clients, error: clientErr } = await supabase.from('users').select('*').eq('phone_number_id', phone_number_id).limit(1);
+                        const { data: clients } = await supabase.from('users').select('*').eq('phone_number_id', phone_number_id).limit(1);
                         const client = clients && clients.length > 0 ? clients[0] : null;
 
-                        if (!client) {
-                            console.log("❌ Webhook: Client not found for phone_number_id:", phone_number_id);
-                            continue;
-                        }
+                        if (!client) continue;
 
-                        let msgBody = ""; // 🔥 FIX: msgText වෙනුවට ආපහු msgBody ම දැම්මා
+                        let msgBody = ""; 
                         let lastMessageText = ""; 
                         let finalMediaUrl = null;
 
-                        // 🔴 Customer එවන Media එක අල්ලගන්න තැන 🔴
                         if (msgType === "text") {
                             msgBody = msgObj.text.body;
+                            lastMessageText = msgBody;
+                        } else if (msgType === "button") {
+                            msgBody = msgObj.button.text;
+                            lastMessageText = msgBody;
+                        } else if (msgType === "interactive") {
+                            msgBody = msgObj.interactive.button_reply?.title || msgObj.interactive.list_reply?.title || "Interactive Reply";
                             lastMessageText = msgBody;
                         } else if (["image", "video", "audio", "document", "sticker"].includes(msgType)) {
                             const mediaObj = msgObj[msgType];
                             const mediaId = mediaObj.id;
-                            
-                            // Caption එකක් නැත්නම් Chat එකට Text එකක් දාන්නේ නෑ ("" හිස් කරනවා)
                             msgBody = mediaObj.caption || ""; 
                             
-                            // වම් පැත්තේ List එකේ ලස්සනට පේන්න අයිකන් එකක් දානවා
-                            const icons = { image: "📷 Image", video: "🎥 Video", audio: "🎤 Voice Note", document: "📄 Document", sticker: "🎭 Sticker" };
+                            const icons = { image: "📷 Image", video: "🎥 Video", audio: "🎤 Voice", document: "📄 Document", sticker: "🎭 Sticker" };
                             lastMessageText = mediaObj.caption || icons[msgType] || `📎 Attachment`;
-
-                            console.log(`⏳ Downloading customer ${msgType}...`);
                             
                             const metaMediaUrl = await getMediaUrlFromMeta(mediaId, client.access_token);
-                            
-                            if (metaMediaUrl) {
-                                finalMediaUrl = await uploadMediaToCloudinary(metaMediaUrl, client.access_token);
-                                console.log(`✅ Uploaded to Cloudinary: ${finalMediaUrl}`);
-                            }
+                            if (metaMediaUrl) finalMediaUrl = await uploadMediaToCloudinary(metaMediaUrl, client.access_token);
                         } else {
                             msgBody = "";
                             lastMessageText = `📎 ${msgType}`;
                         }
 
+                        // DB Contact Update
                         let { data: contacts } = await supabase.from('contacts').select('*').eq('phone_number', from).eq('owner_id', client.id).limit(1);
                         let contact = contacts && contacts.length > 0 ? contacts[0] : null;
 
@@ -147,7 +157,7 @@ router.post("/", async (req, res) => {
                             contact = newContacts && newContacts.length > 0 ? newContacts[0] : null;
                         } else {
                             await supabase.from('contacts').update({
-                                last_message: lastMessageText, // Sidebar එකට Last Message එක යවනවා
+                                last_message: lastMessageText,
                                 last_message_time: new Date().toISOString(),
                                 unread_count: (contact.unread_count || 0) + 1
                             }).eq('id', contact.id);
@@ -155,17 +165,17 @@ router.post("/", async (req, res) => {
 
                         if (!contact) continue;
 
-                        // 🔴 Database එකට Message එක Save කරන තැන 🔴
+                        // Save Message
                         await supabase.from('messages').insert([{
                             contact_id: contact.id,
                             owner_id: client.id,
-                            text: msgBody, // මෙතනට එන්නේ "" (හිස්) අගයක් නිසා දැන් බොරු වචන වැටෙන්නේ නෑ
+                            text: msgBody, 
                             sender: "customer",
                             type: msgType,
                             media_url: finalMediaUrl 
                         }]);
 
-                        // Bot Logic...
+                        // 🤖 BOT AUTO-REPLY LOGIC
                         const { data: botConfigs } = await supabase.from('bot_configs').select('*').eq('owner_id', client.id).limit(1);
                         const botConfig = botConfigs && botConfigs.length > 0 ? botConfigs[0] : null;
 
@@ -178,11 +188,17 @@ router.post("/", async (req, res) => {
                                 session = newSessions && newSessions.length > 0 ? newSessions[0] : null;
                             }
 
-                            if ((Date.now() - new Date(session.last_active).getTime()) > SESSION_TIMEOUT) session.current_step = 0;
-                            if (msgType === 'text' && (msgBody.toLowerCase() === 'hi' || msgBody.toLowerCase() === 'start')) session.current_step = 0;
+                            let currentStep = session.current_step;
+                            if ((now - new Date(session.last_active).getTime()) > SESSION_TIMEOUT) currentStep = 0;
+                            if (msgType === 'text' && (msgBody.toLowerCase() === 'hi' || msgBody.toLowerCase() === 'start')) currentStep = 0;
 
-                            if (session.current_step < botConfig.replies.length) {
-                                const reply = botConfig.replies[session.current_step];
+                            if (currentStep < botConfig.replies.length) {
+                                const reply = botConfig.replies[currentStep];
+
+                                // 🔥 RACE-CONDITION FIX: මැසේජ් එක යවන්න කලින් Step එක අනිවාර්යයෙන්ම Update කරනවා
+                                await supabase.from('chat_sessions')
+                                    .update({ current_step: currentStep + 1, last_active: new Date(now).toISOString() })
+                                    .eq('id', session.id);
 
                                 await sendWhatsAppMessage(client, from, reply);
 
@@ -196,15 +212,13 @@ router.post("/", async (req, res) => {
                                     type: reply.mediaType || 'text',
                                     media_url: reply.media || null
                                 }]);
-
-                                await supabase.from('chat_sessions').update({ current_step: session.current_step + 1, last_active: new Date().toISOString() }).eq('id', session.id);
                             }
                         }
                     }
                 }
             }
         }
-    } catch (err) { console.error("❌ Webhook Fatal Error:", err.message); }
+    } catch (err) {}
 });
 
 const sendWhatsAppMessage = async (client, to, replyStep) => {
@@ -226,9 +240,7 @@ const sendWhatsAppMessage = async (client, to, replyStep) => {
         }
 
         await axios.post(url, body, { headers });
-    } catch (error) {
-        console.error("❌ Bot Send Failed:", error.response ? error.response.data : error.message);
-    }
+    } catch (error) {}
 };
 
 module.exports = router;
