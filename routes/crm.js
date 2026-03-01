@@ -21,7 +21,11 @@ router.get("/contacts", verifyToken, async (req, res) => {
         query = query.eq('owner_id', req.user.id);
     }
 
-    const { data: contacts, error: contactErr } = await query.order('created_at', { ascending: false });
+    // 🔥 METHANA THAMAI WENAS KALE 🔥
+    // .limit(10000) dunnama contacts 10,000k wenakam ekaparata ganna puluwan. 
+    const { data: contacts, error: contactErr } = await query
+        .order('created_at', { ascending: false })
+        .limit(10000); 
 
     if (contactErr) throw contactErr;
 
