@@ -2,12 +2,10 @@ const router = require("express").Router();
 const axios = require("axios");
 const supabase = require("../supabase");
 const { verifyToken } = require("../verifyToken");
-const waMessageId = response.data.messages?.[0]?.id || null;
 
 // 1. GET MESSAGES FOR A CONTACT
 router.get("/:contactId", verifyToken, async (req, res) => {
     try {
-        // අදාල Chat එකේ මැසේජ් ටික ගන්නවා
         const { data, error } = await supabase
             .from('messages')
             .select('*')
@@ -16,7 +14,7 @@ router.get("/:contactId", verifyToken, async (req, res) => {
 
         if (error) throw error;
 
-        // 🔥 FIX: Chat එක open කරපු ගමන් (මැසේජ් ටික ඉල්ලපු ගමන්), Database එකේ Unread Count එක 0 කරනවා
+        // Chat එක open කරපු ගමන් Unread Count එක 0 කරනවා
         await supabase
             .from('contacts')
             .update({ unread_count: 0 })
@@ -27,7 +25,7 @@ router.get("/:contactId", verifyToken, async (req, res) => {
             _id: m.id,
             mediaUrl: m.media_url,
             createdAt: m.created_at,
-            whatsapp_message_id: m.whatsapp_message_id // 🔥 NEW: Reply කරන්න WhatsApp Message ID එක Frontend එකට යවනවා
+            whatsapp_message_id: m.whatsapp_message_id 
         }));
 
         res.status(200).json(formattedMessages);
@@ -39,7 +37,6 @@ router.get("/:contactId", verifyToken, async (req, res) => {
 // 2. SEND MESSAGE
 router.post("/send", verifyToken, async (req, res) => {
     try {
-        // 🔥 NEW: replyToMessageId එක req.body එකෙන් ගන්නවා
         const { contactId, to, text, type, mediaUrl, replyToMessageId } = req.body;
         
         let ownerId = req.user.id; 
@@ -75,7 +72,6 @@ router.post("/send", verifyToken, async (req, res) => {
         
         let payload = { messaging_product: "whatsapp", recipient_type: "individual", to: to };
 
-        // 🔥 NEW: Reply කරනවා නම්, ඒ අදාල Message ID එක Payload එකට දානවා (Context Reply)
         if (replyToMessageId) {
             payload.context = {
                 message_id: replyToMessageId
@@ -91,7 +87,11 @@ router.post("/send", verifyToken, async (req, res) => {
             payload.text = { body: text };
         }
 
-        await axios.post(url, payload, { headers });
+        // API එකෙන් මැසේජ් එක යවනවා
+        const response = await axios.post(url, payload, { headers });
+        
+        // 🔥 මේ තියෙන්නේ අර උඩ තිබ්බ කෝඩ් එක එන්න ඕන හරිම තැන!
+        const waMessageId = response.data.messages?.[0]?.id || null;
 
         const { data: savedMsg, error: saveErr } = await supabase.from('messages').insert([{
             contact_id: contactId,
@@ -102,7 +102,6 @@ router.post("/send", verifyToken, async (req, res) => {
             type: type || "text",
             media_url: mediaUrl || null,
             whatsapp_message_id: waMessageId
-
         }]).select().single();
 
         if (saveErr) throw saveErr;
