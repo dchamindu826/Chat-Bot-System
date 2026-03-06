@@ -100,9 +100,16 @@ router.get('/user-stats', verifyToken, async (req, res) => {
     const { phase, time } = req.query;
     const ownerId = req.user.id;
     
-    let startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
-    const todayIso = startOfToday.toISOString();
+    // 🔥 NEW: 9 AM to 9 AM Shift Logic
+    let now = new Date();
+    let shiftStart = new Date(now);
+    shiftStart.setHours(9, 0, 0, 0); // අද උදේ 9 ට වෙලාව හදනවා
+
+    // දැනට තියෙන වෙලාව උදේ 9 ට අඩුයි නම් (උදා: පාන්දර 8), ඒ කියන්නේ ඊයේ උදේ 9 Shift එක තාම දුවනවා
+    if (now < shiftStart) {
+        shiftStart.setDate(shiftStart.getDate() - 1);
+    }
+    const todayIso = shiftStart.toISOString();
 
     // Total Calls
     let callsQuery = supabase.from('contacts').select('*', { count: 'exact', head: true }).eq('owner_id', ownerId);
@@ -145,9 +152,16 @@ router.get('/agent-performance', verifyToken, async (req, res) => {
     const { phase, time } = req.query;
     const ownerId = req.user.id;
 
-    let startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
-    const todayIso = startOfToday.toISOString();
+    // 🔥 NEW: 9 AM to 9 AM Shift Logic
+    let now = new Date();
+    let shiftStart = new Date(now);
+    shiftStart.setHours(9, 0, 0, 0); // අද උදේ 9 ට වෙලාව හදනවා
+
+    // දැනට තියෙන වෙලාව උදේ 9 ට අඩුයි නම් (උදා: පාන්දර 8), ඒ කියන්නේ ඊයේ උදේ 9 Shift එක තාම දුවනවා
+    if (now < shiftStart) {
+        shiftStart.setDate(shiftStart.getDate() - 1);
+    }
+    const todayIso = shiftStart.toISOString();
 
     // 1. Get all agents for this owner
     const { data: agents, error: agentErr } = await supabase
