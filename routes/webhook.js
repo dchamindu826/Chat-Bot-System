@@ -58,6 +58,34 @@ const uploadMediaToCloudinary = async (mediaUrl, accessToken) => {
     }
 };
 
+// 🔥 UPDATED: මැසේජ් එක යවලා ඒකෙ ID එක Return කරන්න Function එක හැදුවා
+const sendWhatsAppMessage = async (client, to, replyStep) => {
+    try {
+        const url = `https://graph.facebook.com/v17.0/${client.phone_number_id}/messages`;
+        const headers = { Authorization: `Bearer ${client.access_token}`, "Content-Type": "application/json" };
+
+        let body = { messaging_product: "whatsapp", recipient_type: "individual", to: to };
+
+        if (replyStep.mediaType && replyStep.mediaType !== 'text' && replyStep.media) {
+            body.type = replyStep.mediaType;
+            body[replyStep.mediaType] = { link: replyStep.media };
+            if (replyStep.text && replyStep.mediaType !== 'audio') {
+                body[replyStep.mediaType].caption = replyStep.text;
+            }
+        } else {
+            body.type = "text";
+            body.text = { body: replyStep.text };
+        }
+
+        const response = await axios.post(url, body, { headers });
+        // 🔥 NEW: Return message ID
+        return response.data.messages?.[0]?.id || null;
+    } catch (error) {
+        console.error("Bot Reply send error:", error.message);
+        return null;
+    }
+};
+
 router.post("/", async (req, res) => {
     // Meta එකට ඉක්මනින් 200 OK යවන්න (නැත්නම් ඒගොල්ලෝ දිගටම Retry කරනවා)
     res.status(200).send("EVENT_RECEIVED");
@@ -165,14 +193,15 @@ router.post("/", async (req, res) => {
 
                         if (!contact) continue;
 
-                        // Save Message
+                        // Save Incoming Message to Database
                         await supabase.from('messages').insert([{
                             contact_id: contact.id,
                             owner_id: client.id,
                             text: msgBody, 
                             sender: "customer",
                             type: msgType,
-                            media_url: finalMediaUrl 
+                            media_url: finalMediaUrl,
+                            whatsapp_message_id: msgId // 🔥 NEW: ළමයා එවපු මැසේජ් එකේ ID එක Save කළා
                         }]);
 
                         // 🤖 BOT AUTO-REPLY LOGIC
@@ -200,8 +229,10 @@ router.post("/", async (req, res) => {
                                     .update({ current_step: currentStep + 1, last_active: new Date(now).toISOString() })
                                     .eq('id', session.id);
 
-                                await sendWhatsAppMessage(client, from, reply);
+                                // 🔥 NEW: Bot යවපු මැසේජ් එකේ ID එක ගන්නවා
+                                const botMsgId = await sendWhatsAppMessage(client, from, reply);
 
+                                // Save Bot Message to Database
                                 await supabase.from('messages').insert([{
                                     contact_id: contact.id,
                                     owner_id: client.id,
@@ -210,7 +241,8 @@ router.post("/", async (req, res) => {
                                     direction: "outbound",
                                     is_bot_reply: true,
                                     type: reply.mediaType || 'text',
-                                    media_url: reply.media || null
+                                    media_url: reply.media || null,
+                                    whatsapp_message_id: botMsgId // 🔥 NEW: Bot එවපු මැසේජ් එකේ ID එකත් Save කළා
                                 }]);
                             }
                         }
@@ -218,29 +250,9 @@ router.post("/", async (req, res) => {
                 }
             }
         }
-    } catch (err) {}
+    } catch (err) {
+        console.error("Webhook Error: ", err.message);
+    }
 });
-
-const sendWhatsAppMessage = async (client, to, replyStep) => {
-    try {
-        const url = `https://graph.facebook.com/v17.0/${client.phone_number_id}/messages`;
-        const headers = { Authorization: `Bearer ${client.access_token}`, "Content-Type": "application/json" };
-
-        let body = { messaging_product: "whatsapp", recipient_type: "individual", to: to };
-
-        if (replyStep.mediaType && replyStep.mediaType !== 'text' && replyStep.media) {
-            body.type = replyStep.mediaType;
-            body[replyStep.mediaType] = { link: replyStep.media };
-            if (replyStep.text && replyStep.mediaType !== 'audio') {
-                body[replyStep.mediaType].caption = replyStep.text;
-            }
-        } else {
-            body.type = "text";
-            body.text = { body: replyStep.text };
-        }
-
-        await axios.post(url, body, { headers });
-    } catch (error) {}
-};
 
 module.exports = router;

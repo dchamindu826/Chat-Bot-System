@@ -2,6 +2,7 @@ const router = require("express").Router();
 const axios = require("axios");
 const supabase = require("../supabase");
 const { verifyToken } = require("../verifyToken");
+const waMessageId = response.data.messages?.[0]?.id || null;
 
 // 1. GET MESSAGES FOR A CONTACT
 router.get("/:contactId", verifyToken, async (req, res) => {
@@ -99,7 +100,9 @@ router.post("/send", verifyToken, async (req, res) => {
             sender: "me",
             direction: "outbound",
             type: type || "text",
-            media_url: mediaUrl || null
+            media_url: mediaUrl || null,
+            whatsapp_message_id: waMessageId
+
         }]).select().single();
 
         if (saveErr) throw saveErr;
