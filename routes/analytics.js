@@ -34,7 +34,7 @@ router.get('/overview', verifyTokenAndAdmin, async (req, res) => {
         .select('created_at')
         .gte('created_at', isoDate);
 
-    // Group by date locally (since simple query is easier than RPC for this)
+    // Group by date locally
     const dateCounts = {};
     if (recentMessages) {
         recentMessages.forEach(msg => {
@@ -97,7 +97,6 @@ router.get('/logs', verifyTokenAndAdmin, async (req, res) => {
 // 3. USER DASHBOARD STATS
 router.get('/user-stats', verifyToken, async (req, res) => {
   try {
-    // 🔥 NEW: time filter eka gannawa
     const { phase, time } = req.query;
     const ownerId = req.user.id;
     
@@ -108,7 +107,7 @@ router.get('/user-stats', verifyToken, async (req, res) => {
     // Total Calls
     let callsQuery = supabase.from('contacts').select('*', { count: 'exact', head: true }).eq('owner_id', ownerId);
     if (phase && phase !== 'All') callsQuery = callsQuery.eq('phase', parseInt(phase));
-    if (time === 'today') callsQuery = callsQuery.gte('updated_at', todayIso);
+    if (time === 'today') callsQuery = callsQuery.gte('last_message_time', todayIso); // 🔥 FIXED COLUMN NAME
     const { count: totalCalls } = await callsQuery;
 
     // Total Messages
@@ -119,13 +118,13 @@ router.get('/user-stats', verifyToken, async (req, res) => {
     // Assigned Contacts
     let assignedQuery = supabase.from('contacts').select('*', { count: 'exact', head: true }).eq('owner_id', ownerId).not('assigned_to', 'is', null);
     if (phase && phase !== 'All') assignedQuery = assignedQuery.eq('phase', parseInt(phase));
-    if (time === 'today') assignedQuery = assignedQuery.gte('updated_at', todayIso);
+    if (time === 'today') assignedQuery = assignedQuery.gte('last_message_time', todayIso); // 🔥 FIXED COLUMN NAME
     const { count: assignedContacts } = await assignedQuery;
 
     // Answered Contacts
     let answeredQuery = supabase.from('contacts').select('*', { count: 'exact', head: true }).eq('owner_id', ownerId).eq('call_status', 'Answered');
     if (phase && phase !== 'All') answeredQuery = answeredQuery.eq('phase', parseInt(phase));
-    if (time === 'today') answeredQuery = answeredQuery.gte('updated_at', todayIso);
+    if (time === 'today') answeredQuery = answeredQuery.gte('last_message_time', todayIso); // 🔥 FIXED COLUMN NAME
     const { count: answeredContacts } = await answeredQuery;
     
     const responseRate = assignedContacts > 0 ? ((answeredContacts / assignedContacts) * 100).toFixed(1) : 0;
@@ -143,7 +142,6 @@ router.get('/user-stats', verifyToken, async (req, res) => {
 // 4. AGENT PERFORMANCE
 router.get('/agent-performance', verifyToken, async (req, res) => {
   try {
-    // 🔥 NEW: time filter eka gannawa
     const { phase, time } = req.query;
     const ownerId = req.user.id;
 
@@ -165,9 +163,9 @@ router.get('/agent-performance', verifyToken, async (req, res) => {
     if (phase && phase !== 'All') {
         contactsQuery = contactsQuery.eq('phase', parseInt(phase));
     }
-    // 🔥 NEW: Apply today filter
+    // 🔥 NEW: Apply today filter using last_message_time
     if (time === 'today') {
-        contactsQuery = contactsQuery.gte('updated_at', todayIso);
+        contactsQuery = contactsQuery.gte('last_message_time', todayIso); // 🔥 FIXED COLUMN NAME
     }
 
     const { data: contacts, error: contactErr } = await contactsQuery;
@@ -176,17 +174,14 @@ router.get('/agent-performance', verifyToken, async (req, res) => {
     // 3. Process Logic Locally
     const agentStats = {};
     
-    // Initialize stats for each agent
     (agents || []).forEach(agent => {
         agentStats[agent.id] = { id: agent.id, agentName: agent.name, totalAllocated: 0, answered: 0, noAnswer: 0, reject: 0, pending: 0 };
     });
-    // Add Unassigned Pool
     agentStats['unassigned'] = { id: null, agentName: "Unassigned Pool", totalAllocated: 0, answered: 0, noAnswer: 0, reject: 0, pending: 0 };
 
-    // Calculate Stats
     (contacts || []).forEach(c => {
         const agentId = c.assigned_to || 'unassigned';
-        if (!agentStats[agentId]) return; // Fallback if agent deleted
+        if (!agentStats[agentId]) return;
 
         agentStats[agentId].totalAllocated += 1;
         const attempts = parseInt(c.attempt_count || 0);
@@ -202,11 +197,10 @@ router.get('/agent-performance', verifyToken, async (req, res) => {
         }
     });
 
-    // 4. Format and Calculate derived values (responseRate, toCover)
+    // 4. Format and Calculate derived values
     const formattedStats = Object.values(agentStats).map(stat => {
         const responseRate = stat.totalAllocated > 0 ? ((stat.answered / stat.totalAllocated) * 100).toFixed(1) : 0;
         
-        // Auto Calculate 'To Cover'
         const totalActioned = stat.answered + stat.noAnswer + stat.reject;
         const toCover = stat.totalAllocated - totalActioned;
 
