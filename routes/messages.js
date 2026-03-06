@@ -25,7 +25,8 @@ router.get("/:contactId", verifyToken, async (req, res) => {
             ...m,
             _id: m.id,
             mediaUrl: m.media_url,
-            createdAt: m.created_at
+            createdAt: m.created_at,
+            whatsapp_message_id: m.whatsapp_message_id // 🔥 NEW: Reply කරන්න WhatsApp Message ID එක Frontend එකට යවනවා
         }));
 
         res.status(200).json(formattedMessages);
@@ -37,7 +38,8 @@ router.get("/:contactId", verifyToken, async (req, res) => {
 // 2. SEND MESSAGE
 router.post("/send", verifyToken, async (req, res) => {
     try {
-        const { contactId, to, text, type, mediaUrl } = req.body;
+        // 🔥 NEW: replyToMessageId එක req.body එකෙන් ගන්නවා
+        const { contactId, to, text, type, mediaUrl, replyToMessageId } = req.body;
         
         let ownerId = req.user.id; 
 
@@ -71,6 +73,13 @@ router.post("/send", verifyToken, async (req, res) => {
         const headers = { Authorization: `Bearer ${ownerUser.access_token}`, "Content-Type": "application/json" };
         
         let payload = { messaging_product: "whatsapp", recipient_type: "individual", to: to };
+
+        // 🔥 NEW: Reply කරනවා නම්, ඒ අදාල Message ID එක Payload එකට දානවා (Context Reply)
+        if (replyToMessageId) {
+            payload.context = {
+                message_id: replyToMessageId
+            };
+        }
 
         if (type && type !== 'text' && mediaUrl) {
             payload.type = type;

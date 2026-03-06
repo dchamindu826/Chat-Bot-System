@@ -53,4 +53,20 @@ router.get("/my", verifyToken, async (req, res) => {
   }
 });
 
+// 3. DELETE QUICK REPLY
+router.delete("/:id", verifyToken, async (req, res) => {
+  try {
+    const { error } = await supabase
+        .from('quick_replies')
+        .delete()
+        .eq('id', req.params.id); // Supabase eke column eka 'id'
+
+    if (error) throw error;
+    res.status(200).json({ message: "Deleted successfully" });
+  } catch (err) {
+    console.error("Quick Reply Delete Error:", err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
 module.exports = router;
