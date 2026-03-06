@@ -5,7 +5,8 @@ const { verifyToken } = require("../verifyToken");
 // 1. CREATE NEW QUICK REPLY
 router.post("/add", verifyToken, async (req, res) => {
   try {
-    const { title, message } = req.body;
+    // 🔥 NEW: Getting mediaUrl and mediaType from frontend
+    const { title, message, mediaUrl, mediaType } = req.body;
     
     let ownerId = req.user.id;
     if (req.user.role === 'agent') {
@@ -16,7 +17,9 @@ router.post("/add", verifyToken, async (req, res) => {
     const { data, error } = await supabase.from('quick_replies').insert([{
         user_id: String(ownerId), 
         title: title,
-        message: message
+        message: message || "",
+        media_url: mediaUrl || null,    // 🔥 NEW
+        media_type: mediaType || 'text' // 🔥 NEW
     }]).select();
 
     if (error) throw error;

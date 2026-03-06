@@ -8,8 +8,12 @@ const QuickReplySchema = new mongoose.Schema(
     // Template එකේ නම (උදා: Welcome, Price List)
     title: { type: String, required: true },
     
-    // යවන්න ඕන දිග මැසේජ් එක
-    message: { type: String, required: true }
+    // යවන්න ඕන දිග මැසේජ් එක (Media විතරක් යවනවනම් මේක හිස් වෙන්න පුළුවන්)
+    message: { type: String, required: false },
+
+    // 🔥 NEW: Media URL and Type
+    mediaUrl: { type: String, default: null },
+    mediaType: { type: String, default: 'text' }
   },
   { timestamps: true }
 );

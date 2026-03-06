@@ -97,25 +97,35 @@ router.get('/logs', verifyTokenAndAdmin, async (req, res) => {
 // 3. USER DASHBOARD STATS
 router.get('/user-stats', verifyToken, async (req, res) => {
   try {
-    const { phase } = req.query;
+    // 🔥 NEW: time filter eka gannawa
+    const { phase, time } = req.query;
     const ownerId = req.user.id;
     
+    let startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const todayIso = startOfToday.toISOString();
+
     // Total Calls
     let callsQuery = supabase.from('contacts').select('*', { count: 'exact', head: true }).eq('owner_id', ownerId);
     if (phase && phase !== 'All') callsQuery = callsQuery.eq('phase', parseInt(phase));
+    if (time === 'today') callsQuery = callsQuery.gte('updated_at', todayIso);
     const { count: totalCalls } = await callsQuery;
 
     // Total Messages
-    const { count: totalMessages } = await supabase.from('messages').select('*', { count: 'exact', head: true }).eq('owner_id', ownerId);
+    let msgsQuery = supabase.from('messages').select('*', { count: 'exact', head: true }).eq('owner_id', ownerId);
+    if (time === 'today') msgsQuery = msgsQuery.gte('created_at', todayIso);
+    const { count: totalMessages } = await msgsQuery;
 
     // Assigned Contacts
     let assignedQuery = supabase.from('contacts').select('*', { count: 'exact', head: true }).eq('owner_id', ownerId).not('assigned_to', 'is', null);
     if (phase && phase !== 'All') assignedQuery = assignedQuery.eq('phase', parseInt(phase));
+    if (time === 'today') assignedQuery = assignedQuery.gte('updated_at', todayIso);
     const { count: assignedContacts } = await assignedQuery;
 
     // Answered Contacts
     let answeredQuery = supabase.from('contacts').select('*', { count: 'exact', head: true }).eq('owner_id', ownerId).eq('call_status', 'Answered');
     if (phase && phase !== 'All') answeredQuery = answeredQuery.eq('phase', parseInt(phase));
+    if (time === 'today') answeredQuery = answeredQuery.gte('updated_at', todayIso);
     const { count: answeredContacts } = await answeredQuery;
     
     const responseRate = assignedContacts > 0 ? ((answeredContacts / assignedContacts) * 100).toFixed(1) : 0;
@@ -130,11 +140,16 @@ router.get('/user-stats', verifyToken, async (req, res) => {
   }
 });
 
-// 4. AGENT PERFORMANCE (🔥 FIXED to use Supabase)
+// 4. AGENT PERFORMANCE
 router.get('/agent-performance', verifyToken, async (req, res) => {
   try {
-    const { phase } = req.query;
+    // 🔥 NEW: time filter eka gannawa
+    const { phase, time } = req.query;
     const ownerId = req.user.id;
+
+    let startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const todayIso = startOfToday.toISOString();
 
     // 1. Get all agents for this owner
     const { data: agents, error: agentErr } = await supabase
@@ -150,11 +165,15 @@ router.get('/agent-performance', verifyToken, async (req, res) => {
     if (phase && phase !== 'All') {
         contactsQuery = contactsQuery.eq('phase', parseInt(phase));
     }
+    // 🔥 NEW: Apply today filter
+    if (time === 'today') {
+        contactsQuery = contactsQuery.gte('updated_at', todayIso);
+    }
+
     const { data: contacts, error: contactErr } = await contactsQuery;
-    
     if (contactErr) throw contactErr;
 
-    // 3. Process Logic Locally (Replacement for Mongo Aggregate)
+    // 3. Process Logic Locally
     const agentStats = {};
     
     // Initialize stats for each agent
@@ -177,7 +196,6 @@ router.get('/agent-performance', verifyToken, async (req, res) => {
         } else if (c.call_status === 'Reject') {
             agentStats[agentId].reject += 1;
         } else if (c.call_status === 'No Answer' || (c.call_status === 'Pending' && attempts > 0)) {
-            // Count 'No Answer' IF status is 'No Answer' OR (Status is 'Pending' BUT Attempts > 0)
             agentStats[agentId].noAnswer += 1;
         } else if (c.call_status === 'Pending' && attempts === 0) {
             agentStats[agentId].pending += 1;
