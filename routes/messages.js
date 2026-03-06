@@ -3,7 +3,7 @@ const axios = require("axios");
 const supabase = require("../supabase");
 const { verifyToken } = require("../verifyToken");
 
-// 1. GET MESSAGES FOR A CONTACT
+// 1. GET MESSAGES
 router.get("/:contactId", verifyToken, async (req, res) => {
     try {
         const { data, error } = await supabase
@@ -14,18 +14,15 @@ router.get("/:contactId", verifyToken, async (req, res) => {
 
         if (error) throw error;
 
-        // Chat එක open කරපු ගමන් Unread Count එක 0 කරනවා
-        await supabase
-            .from('contacts')
-            .update({ unread_count: 0 })
-            .eq('id', req.params.contactId);
+        await supabase.from('contacts').update({ unread_count: 0 }).eq('id', req.params.contactId);
 
         const formattedMessages = data.map(m => ({
             ...m,
             _id: m.id,
             mediaUrl: m.media_url,
             createdAt: m.created_at,
-            whatsapp_message_id: m.whatsapp_message_id 
+            whatsapp_message_id: m.whatsapp_message_id,
+            replyContext: m.reply_context // 🔥 NEW: Reply Text එක Frontend එකට යවනවා
         }));
 
         res.status(200).json(formattedMessages);
@@ -37,35 +34,19 @@ router.get("/:contactId", verifyToken, async (req, res) => {
 // 2. SEND MESSAGE
 router.post("/send", verifyToken, async (req, res) => {
     try {
-        const { contactId, to, text, type, mediaUrl, replyToMessageId } = req.body;
+        // 🔥 NEW: replyContext එක අරගන්නවා
+        const { contactId, to, text, type, mediaUrl, replyToMessageId, replyContext } = req.body;
         
         let ownerId = req.user.id; 
 
         if (req.user.role && req.user.role.toLowerCase() === 'agent') {
-            const { data: agentData, error: agentErr } = await supabase
-                .from('users')
-                .select('owner_id')
-                .eq('id', req.user.id)
-                .single();
-                
-            if (agentData && agentData.owner_id) {
-                ownerId = agentData.owner_id; 
-            } else {
-                return res.status(400).json({ message: "Agent setup incomplete: owner_id not found." });
-            }
+            const { data: agentData } = await supabase.from('users').select('owner_id').eq('id', req.user.id).single();
+            if (agentData && agentData.owner_id) ownerId = agentData.owner_id; 
+            else return res.status(400).json({ message: "Agent setup incomplete." });
         }
 
-        const { data: ownerUser, error: ownerErr } = await supabase
-            .from('users')
-            .select('*')
-            .eq('id', ownerId)
-            .single();
-        
-        if (ownerErr || !ownerUser) return res.status(404).json({ message: "Owner config not found" });
-
-        if (!ownerUser.phone_number_id) {
-            return res.status(400).json({ message: "WhatsApp API is not configured. Missing Phone Number ID." });
-        }
+        const { data: ownerUser } = await supabase.from('users').select('*').eq('id', ownerId).single();
+        if (!ownerUser || !ownerUser.phone_number_id) return res.status(400).json({ message: "WhatsApp API is not configured." });
 
         const url = `https://graph.facebook.com/v17.0/${ownerUser.phone_number_id}/messages`;
         const headers = { Authorization: `Bearer ${ownerUser.access_token}`, "Content-Type": "application/json" };
@@ -73,9 +54,7 @@ router.post("/send", verifyToken, async (req, res) => {
         let payload = { messaging_product: "whatsapp", recipient_type: "individual", to: to };
 
         if (replyToMessageId) {
-            payload.context = {
-                message_id: replyToMessageId
-            };
+            payload.context = { message_id: replyToMessageId };
         }
 
         if (type && type !== 'text' && mediaUrl) {
@@ -87,10 +66,7 @@ router.post("/send", verifyToken, async (req, res) => {
             payload.text = { body: text };
         }
 
-        // API එකෙන් මැසේජ් එක යවනවා
         const response = await axios.post(url, payload, { headers });
-        
-        // 🔥 මේ තියෙන්නේ අර උඩ තිබ්බ කෝඩ් එක එන්න ඕන හරිම තැන!
         const waMessageId = response.data.messages?.[0]?.id || null;
 
         const { data: savedMsg, error: saveErr } = await supabase.from('messages').insert([{
@@ -101,7 +77,8 @@ router.post("/send", verifyToken, async (req, res) => {
             direction: "outbound",
             type: type || "text",
             media_url: mediaUrl || null,
-            whatsapp_message_id: waMessageId
+            whatsapp_message_id: waMessageId,
+            reply_context: replyContext || null // 🔥 NEW: රිප්ලයි කරපු පරණ මැසේජ් එක සේව් කරනවා
         }]).select().single();
 
         if (saveErr) throw saveErr;
@@ -115,11 +92,11 @@ router.post("/send", verifyToken, async (req, res) => {
             ...savedMsg,
             _id: savedMsg.id,
             mediaUrl: savedMsg.media_url,
-            createdAt: savedMsg.created_at
+            createdAt: savedMsg.created_at,
+            replyContext: savedMsg.reply_context
         });
 
     } catch (err) {
-        console.error("Send Error:", err.response ? err.response.data : err.message);
         res.status(500).json({ message: err.message });
     }
 });
