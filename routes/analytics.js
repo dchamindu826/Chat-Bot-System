@@ -97,41 +97,52 @@ router.get('/logs', verifyTokenAndAdmin, async (req, res) => {
 // 3. USER DASHBOARD STATS
 router.get('/user-stats', verifyToken, async (req, res) => {
   try {
-    const { phase, time } = req.query;
+    const { phase, time, startDate, endDate } = req.query; // 🔥 ADDED startDate & endDate
     const ownerId = req.user.id;
     
-    // 🔥 NEW: 9 AM to 9 AM Shift Logic
-    let now = new Date();
-    let shiftStart = new Date(now);
-    shiftStart.setHours(9, 0, 0, 0); // අද උදේ 9 ට වෙලාව හදනවා
+    // 🔥 TIME FILTER LOGIC
+    let startIso = null;
+    let endIso = null;
 
-    // දැනට තියෙන වෙලාව උදේ 9 ට අඩුයි නම් (උදා: පාන්දර 8), ඒ කියන්නේ ඊයේ උදේ 9 Shift එක තාම දුවනවා
-    if (now < shiftStart) {
-        shiftStart.setDate(shiftStart.getDate() - 1);
+    if (time === 'today') {
+        let now = new Date();
+        let shiftStart = new Date(now);
+        shiftStart.setHours(9, 0, 0, 0); 
+        if (now < shiftStart) {
+            shiftStart.setDate(shiftStart.getDate() - 1);
+        }
+        startIso = shiftStart.toISOString();
+    } else if (startDate && endDate) {
+        // 🔥 Custom Date Range Logic (Start of startDate to End of endDate)
+        startIso = new Date(`${startDate}T00:00:00.000Z`).toISOString();
+        endIso = new Date(`${endDate}T23:59:59.999Z`).toISOString();
     }
-    const todayIso = shiftStart.toISOString();
 
     // Total Calls
     let callsQuery = supabase.from('contacts').select('*', { count: 'exact', head: true }).eq('owner_id', ownerId);
     if (phase && phase !== 'All') callsQuery = callsQuery.eq('phase', parseInt(phase));
-    if (time === 'today') callsQuery = callsQuery.gte('last_message_time', todayIso); // 🔥 FIXED COLUMN NAME
+    if (startIso) callsQuery = callsQuery.gte('last_message_time', startIso);
+    if (endIso) callsQuery = callsQuery.lte('last_message_time', endIso);
     const { count: totalCalls } = await callsQuery;
 
     // Total Messages
     let msgsQuery = supabase.from('messages').select('*', { count: 'exact', head: true }).eq('owner_id', ownerId);
-    if (time === 'today') msgsQuery = msgsQuery.gte('created_at', todayIso);
+    if (startIso) msgsQuery = msgsQuery.gte('created_at', startIso);
+    if (endIso) msgsQuery = msgsQuery.lte('created_at', endIso);
     const { count: totalMessages } = await msgsQuery;
 
     // Assigned Contacts
     let assignedQuery = supabase.from('contacts').select('*', { count: 'exact', head: true }).eq('owner_id', ownerId).not('assigned_to', 'is', null);
     if (phase && phase !== 'All') assignedQuery = assignedQuery.eq('phase', parseInt(phase));
-    if (time === 'today') assignedQuery = assignedQuery.gte('last_message_time', todayIso); // 🔥 FIXED COLUMN NAME
+    if (startIso) assignedQuery = assignedQuery.gte('last_message_time', startIso);
+    if (endIso) assignedQuery = assignedQuery.lte('last_message_time', endIso);
     const { count: assignedContacts } = await assignedQuery;
 
     // Answered Contacts
     let answeredQuery = supabase.from('contacts').select('*', { count: 'exact', head: true }).eq('owner_id', ownerId).eq('call_status', 'Answered');
     if (phase && phase !== 'All') answeredQuery = answeredQuery.eq('phase', parseInt(phase));
-    if (time === 'today') answeredQuery = answeredQuery.gte('last_message_time', todayIso); // 🔥 FIXED COLUMN NAME
+    if (startIso) answeredQuery = answeredQuery.gte('last_message_time', startIso);
+    if (endIso) answeredQuery = answeredQuery.lte('last_message_time', endIso);
     const { count: answeredContacts } = await answeredQuery;
     
     const responseRate = assignedContacts > 0 ? ((answeredContacts / assignedContacts) * 100).toFixed(1) : 0;
@@ -149,19 +160,26 @@ router.get('/user-stats', verifyToken, async (req, res) => {
 // 4. AGENT PERFORMANCE
 router.get('/agent-performance', verifyToken, async (req, res) => {
   try {
-    const { phase, time } = req.query;
+    const { phase, time, startDate, endDate } = req.query; // 🔥 ADDED startDate & endDate
     const ownerId = req.user.id;
 
-    // 🔥 NEW: 9 AM to 9 AM Shift Logic
-    let now = new Date();
-    let shiftStart = new Date(now);
-    shiftStart.setHours(9, 0, 0, 0); // අද උදේ 9 ට වෙලාව හදනවා
+    // 🔥 TIME FILTER LOGIC
+    let startIso = null;
+    let endIso = null;
 
-    // දැනට තියෙන වෙලාව උදේ 9 ට අඩුයි නම් (උදා: පාන්දර 8), ඒ කියන්නේ ඊයේ උදේ 9 Shift එක තාම දුවනවා
-    if (now < shiftStart) {
-        shiftStart.setDate(shiftStart.getDate() - 1);
+    if (time === 'today') {
+        let now = new Date();
+        let shiftStart = new Date(now);
+        shiftStart.setHours(9, 0, 0, 0); 
+        if (now < shiftStart) {
+            shiftStart.setDate(shiftStart.getDate() - 1);
+        }
+        startIso = shiftStart.toISOString();
+    } else if (startDate && endDate) {
+        // 🔥 Custom Date Range Logic
+        startIso = new Date(`${startDate}T00:00:00.000Z`).toISOString();
+        endIso = new Date(`${endDate}T23:59:59.999Z`).toISOString();
     }
-    const todayIso = shiftStart.toISOString();
 
     // 1. Get all agents for this owner
     const { data: agents, error: agentErr } = await supabase
@@ -174,12 +192,17 @@ router.get('/agent-performance', verifyToken, async (req, res) => {
 
     // 2. Get all contacts for this owner
     let contactsQuery = supabase.from('contacts').select('assigned_to, call_status, attempt_count').eq('owner_id', ownerId);
+    
     if (phase && phase !== 'All') {
         contactsQuery = contactsQuery.eq('phase', parseInt(phase));
     }
-    // 🔥 NEW: Apply today filter using last_message_time
-    if (time === 'today') {
-        contactsQuery = contactsQuery.gte('last_message_time', todayIso); // 🔥 FIXED COLUMN NAME
+    
+    // Apply Date Filters
+    if (startIso) {
+        contactsQuery = contactsQuery.gte('last_message_time', startIso);
+    }
+    if (endIso) {
+        contactsQuery = contactsQuery.lte('last_message_time', endIso);
     }
 
     const { data: contacts, error: contactErr } = await contactsQuery;
