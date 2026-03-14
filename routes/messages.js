@@ -22,8 +22,8 @@ router.get("/:contactId", verifyToken, async (req, res) => {
             mediaUrl: m.media_url,
             createdAt: m.created_at,
             whatsapp_message_id: m.whatsapp_message_id,
-            replyContext: m.reply_context, 
-            agentName: m.agent_name // 🔥 NEW: Database එකෙන් agent_name එක අරන් Frontend එකට යවනවා
+            replyContext: m.reply_context,
+            agentName: m.agent_name // 🔥 NEW: Database එකෙන් Agent ගේ නම ගන්නවා
         }));
 
         res.status(200).json(formattedMessages);
@@ -35,7 +35,7 @@ router.get("/:contactId", verifyToken, async (req, res) => {
 // 2. SEND MESSAGE
 router.post("/send", verifyToken, async (req, res) => {
     try {
-        // 🔥 NEW: agentName එක Frontend එකෙන් අල්ලගන්නවා
+        // 🔥 NEW: Frontend එකෙන් එවන agentName එක ගන්නවා
         const { contactId, to, text, type, mediaUrl, replyToMessageId, replyContext, agentName } = req.body;
         
         let ownerId = req.user.id; 
@@ -70,6 +70,7 @@ router.post("/send", verifyToken, async (req, res) => {
         const response = await axios.post(url, payload, { headers });
         const waMessageId = response.data.messages?.[0]?.id || null;
 
+        // 🔥 Database එකට Insert කරනවා
         const { data: savedMsg, error: saveErr } = await supabase.from('messages').insert([{
             contact_id: contactId,
             owner_id: ownerId, 
@@ -80,10 +81,13 @@ router.post("/send", verifyToken, async (req, res) => {
             media_url: mediaUrl || null,
             whatsapp_message_id: waMessageId,
             reply_context: replyContext || null,
-            agent_name: agentName || null // 🔥 NEW: Agent ගේ නම Database එකේ සේව් කරනවා
+            agent_name: agentName || null // 🔥 NEW: Agent Name එක Database එකට යවනවා
         }]).select().single();
 
-        if (saveErr) throw saveErr;
+        if (saveErr) {
+            console.error("Database Insert Error:", saveErr); // Error එක terminal එකේ බලාගන්න
+            throw saveErr;
+        }
 
         await supabase.from('contacts').update({
             last_message: text || `Sent a ${type}`,
@@ -100,6 +104,7 @@ router.post("/send", verifyToken, async (req, res) => {
         });
 
     } catch (err) {
+        console.error("Send Message Error:", err);
         res.status(500).json({ message: err.message });
     }
 });
