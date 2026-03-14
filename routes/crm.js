@@ -5,25 +5,27 @@ const { verifyToken } = require("../verifyToken");
 // 1. GET ALL CONTACTS (Smart Filter)
 router.get("/contacts", verifyToken, async (req, res) => {
   try {
+    // 1. Get current user info including owner_id
     const { data: currentUser, error: userErr } = await supabase
       .from('users')
-      .select('role')
+      .select('role, owner_id')
       .eq('id', req.user.id)
       .single();
 
     if (userErr) throw userErr;
 
-    let query = supabase.from('contacts').select('*');
-
-    if (currentUser.role === 'agent') {
-        query = query.eq('assigned_to', req.user.id);
-    } else {
-        query = query.eq('owner_id', req.user.id);
+    // 🔥 WENAS KALA THANA 🔥
+    // User agent kenek nam eyage owner_id eka gannawa. Owner kenek nam eyagema id eka gannawa.
+    let targetOwnerId = req.user.id;
+    if (currentUser.role === 'agent' && currentUser.owner_id) {
+        targetOwnerId = currentUser.owner_id;
     }
 
-    // 🔥 METHANA THAMAI WENAS KALE 🔥
-    // .limit(10000) dunnama contacts 10,000k wenakam ekaparata ganna puluwan. 
-    const { data: contacts, error: contactErr } = await query
+    // Agent ta unath den e Owner ge serama contacts tika penawa (assigned_to filter eka ain kala)
+    const { data: contacts, error: contactErr } = await supabase
+        .from('contacts')
+        .select('*')
+        .eq('owner_id', targetOwnerId)
         .order('created_at', { ascending: false })
         .limit(10000); 
 
