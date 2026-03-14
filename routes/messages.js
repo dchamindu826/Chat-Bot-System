@@ -22,7 +22,8 @@ router.get("/:contactId", verifyToken, async (req, res) => {
             mediaUrl: m.media_url,
             createdAt: m.created_at,
             whatsapp_message_id: m.whatsapp_message_id,
-            replyContext: m.reply_context // 🔥 NEW: Reply Text එක Frontend එකට යවනවා
+            replyContext: m.reply_context, 
+            agentName: m.agent_name // 🔥 NEW: Database එකෙන් agent_name එක අරන් Frontend එකට යවනවා
         }));
 
         res.status(200).json(formattedMessages);
@@ -34,8 +35,8 @@ router.get("/:contactId", verifyToken, async (req, res) => {
 // 2. SEND MESSAGE
 router.post("/send", verifyToken, async (req, res) => {
     try {
-        // 🔥 NEW: replyContext එක අරගන්නවා
-        const { contactId, to, text, type, mediaUrl, replyToMessageId, replyContext } = req.body;
+        // 🔥 NEW: agentName එක Frontend එකෙන් අල්ලගන්නවා
+        const { contactId, to, text, type, mediaUrl, replyToMessageId, replyContext, agentName } = req.body;
         
         let ownerId = req.user.id; 
 
@@ -78,7 +79,8 @@ router.post("/send", verifyToken, async (req, res) => {
             type: type || "text",
             media_url: mediaUrl || null,
             whatsapp_message_id: waMessageId,
-            reply_context: replyContext || null // 🔥 NEW: රිප්ලයි කරපු පරණ මැසේජ් එක සේව් කරනවා
+            reply_context: replyContext || null,
+            agent_name: agentName || null // 🔥 NEW: Agent ගේ නම Database එකේ සේව් කරනවා
         }]).select().single();
 
         if (saveErr) throw saveErr;
@@ -93,7 +95,8 @@ router.post("/send", verifyToken, async (req, res) => {
             _id: savedMsg.id,
             mediaUrl: savedMsg.media_url,
             createdAt: savedMsg.created_at,
-            replyContext: savedMsg.reply_context
+            replyContext: savedMsg.reply_context,
+            agentName: savedMsg.agent_name // 🔥 NEW
         });
 
     } catch (err) {
