@@ -7,9 +7,9 @@ const SESSION_TIMEOUT = 3 * 24 * 60 * 60 * 1000;
 const CLOUD_NAME = "dyixoaldi";
 const UPLOAD_PRESET = "Chat Bot System";
 
-// 🔥 1. ANTI-LOOP CACHE: එකම Message ID එක දෙපාරක් එන එක නවත්වන්න
+// 🔥 1. ANTI-LOOP CACHE
 const processedMessageIds = new Set();
-// 🔥 2. COOLDOWN TIMER: තත්පර 5ක් ඇතුළත එකම නම්බර් එකෙන් එන මැසේජ් නවත්වන්න
+// 🔥 2. COOLDOWN TIMER
 const userCooldowns = new Map();
 
 router.get("/", (req, res) => {
@@ -58,7 +58,6 @@ const uploadMediaToCloudinary = async (mediaUrl, accessToken) => {
     }
 };
 
-// 🔥 UPDATED: මැසේජ් එක යවලා ඒකෙ ID එක Return කරන්න Function එක හැදුවා
 const sendWhatsAppMessage = async (client, to, replyStep) => {
     try {
         const url = `https://graph.facebook.com/v17.0/${client.phone_number_id}/messages`;
@@ -78,16 +77,14 @@ const sendWhatsAppMessage = async (client, to, replyStep) => {
         }
 
         const response = await axios.post(url, body, { headers });
-        // 🔥 NEW: Return message ID
         return response.data.messages?.[0]?.id || null;
     } catch (error) {
-        console.error("Bot Reply send error:", error.message);
+        console.error("❌ Bot Reply send error:", error.response ? error.response.data : error.message);
         return null;
     }
 };
 
 router.post("/", async (req, res) => {
-    // Meta එකට ඉක්මනින් 200 OK යවන්න (නැත්නම් ඒගොල්ලෝ දිගටම Retry කරනවා)
     res.status(200).send("EVENT_RECEIVED");
 
     try {
@@ -97,7 +94,6 @@ router.post("/", async (req, res) => {
                 for (const change of entry.changes) {
                     const value = change.value;
 
-                    // 🔥 ඉතා වැදගත්: Status Updates (Delivery reports, Echoes) මඟ හරින්න
                     if (value.statuses) continue;
 
                     if (value.messages && value.messages.length > 0) {
@@ -105,7 +101,6 @@ router.post("/", async (req, res) => {
                         const msgId = msgObj.id; 
                         const from = msgObj.from; 
 
-                        // 🛑 BLOCK 1: එකම මැසේජ් එක දෙපාරක් ආවොත් නවත්වන්න
                         if (msgId && processedMessageIds.has(msgId)) {
                             console.log(`🛑 Blocked Meta Retry ID: ${msgId}`);
                             continue;
@@ -115,7 +110,6 @@ router.post("/", async (req, res) => {
                             setTimeout(() => processedMessageIds.delete(msgId), 10 * 60 * 1000);
                         }
 
-                        // 🛑 BLOCK 2: Cooldown Timer (තත්පර 5ක් ඇතුළත ආයේ ආවොත් නවත්වන්න)
                         const now = Date.now();
                         const lastActivity = userCooldowns.get(from) || 0;
                         if (now - lastActivity < 5000) {
@@ -128,23 +122,32 @@ router.post("/", async (req, res) => {
                         const phone_number_id = value.metadata.phone_number_id; 
                         const display_phone_number = value.metadata.display_phone_number; 
 
-                        // 🛑 BLOCK 3: Bot ගේම අංකයෙන් එන ඒවට (Echoes) Auto Reply යන එක නවත්වන්න
                         const sanitizedBotNum = display_phone_number ? display_phone_number.replace(/\D/g, '') : '';
                         if (from === sanitizedBotNum || (sanitizedBotNum && from.includes(sanitizedBotNum))) {
                             continue;
                         }
 
-                        // 🛑 BLOCK 4: System සහ Unknown Type Messages වලට Auto Reply යවන්න එපා (Templates යනකොට එන්නේ මේවා)
                         if (msgType === 'system' || msgType === 'unknown' || msgType === 'unsupported') {
                             continue;
                         }
 
-                        console.log(`📩 Incoming message from: ${from}`);
+                        // 🔥 Advanced Logging පටන් ගන්න තැන:
+                        console.log(`\n=========================================`);
+                        console.log(`📩 Incoming message from: ${from} | Target Phone ID: [${phone_number_id}]`);
 
-                        const { data: clients } = await supabase.from('users').select('*').eq('phone_number_id', phone_number_id).limit(1);
+                        // 1. Check Client
+                        const { data: clients, error: clientErr } = await supabase.from('users').select('*').eq('phone_number_id', phone_number_id).limit(1);
+                        if (clientErr) console.error(`❌ DB Error fetching client:`, clientErr);
+                        
                         const client = clients && clients.length > 0 ? clients[0] : null;
 
-                        if (!client) continue;
+                        if (!client) {
+                            console.log(`❌ ERROR: No client found in DB for phone_number_id: [${phone_number_id}]. Ensure this ID is saved exactly in the Admin Settings without spaces!`);
+                            console.log(`=========================================\n`);
+                            continue;
+                        }
+                        
+                        console.log(`✅ Client Matched: ${client.business_name} (ID: ${client.id})`);
 
                         let msgBody = ""; 
                         let lastMessageText = ""; 
@@ -174,38 +177,52 @@ router.post("/", async (req, res) => {
                             lastMessageText = `📎 ${msgType}`;
                         }
 
-                        // DB Contact Update
-                        let { data: contacts } = await supabase.from('contacts').select('*').eq('phone_number', from).eq('owner_id', client.id).limit(1);
+                        // 2. Check/Create Contact
+                        console.log(`👤 Checking contact...`);
+                        let { data: contacts, error: contactErr } = await supabase.from('contacts').select('*').eq('phone_number', from).eq('owner_id', client.id).limit(1);
+                        if (contactErr) console.error("❌ DB Error fetching contact:", contactErr);
+                        
                         let contact = contacts && contacts.length > 0 ? contacts[0] : null;
 
                         if (!contact) {
-                            const { data: newContacts } = await supabase.from('contacts').insert([{
+                            const { data: newContacts, error: newContactErr } = await supabase.from('contacts').insert([{
                                 phone_number: from, owner_id: client.id, name: `Guest ${from.slice(-4)}`, unread_count: 1
                             }]).select().limit(1);
+                            if (newContactErr) console.error("❌ DB Error creating contact:", newContactErr);
                             contact = newContacts && newContacts.length > 0 ? newContacts[0] : null;
                         } else {
-                            await supabase.from('contacts').update({
+                            const { error: updateErr } = await supabase.from('contacts').update({
                                 last_message: lastMessageText,
                                 last_message_time: new Date().toISOString(),
                                 unread_count: (contact.unread_count || 0) + 1
                             }).eq('id', contact.id);
+                            if (updateErr) console.error("❌ DB Error updating contact:", updateErr);
                         }
 
-                        if (!contact) continue;
+                        if (!contact) {
+                            console.log("❌ Failed to resolve contact object. Aborting.");
+                            continue;
+                        }
 
-                        // Save Incoming Message to Database
-                        await supabase.from('messages').insert([{
+                        // 3. Save Message
+                        console.log(`💾 Saving message...`);
+                        const { error: msgSaveErr } = await supabase.from('messages').insert([{
                             contact_id: contact.id,
                             owner_id: client.id,
                             text: msgBody, 
                             sender: "customer",
                             type: msgType,
                             media_url: finalMediaUrl,
-                            whatsapp_message_id: msgId // 🔥 NEW: ළමයා එවපු මැසේජ් එකේ ID එක Save කළා
+                            whatsapp_message_id: msgId
                         }]);
+                        if (msgSaveErr) console.error("❌ DB Error saving message:", msgSaveErr);
+                        else console.log(`✅ Message saved to Inbox.`);
 
-                        // 🤖 BOT AUTO-REPLY LOGIC
-                        const { data: botConfigs } = await supabase.from('bot_configs').select('*').eq('owner_id', client.id).limit(1);
+                        // 4. Bot Auto-Reply
+                        console.log(`🤖 Checking Bot Config...`);
+                        const { data: botConfigs, error: botErr } = await supabase.from('bot_configs').select('*').eq('owner_id', client.id).limit(1);
+                        if (botErr) console.error("❌ DB Error fetching bot configs:", botErr);
+                        
                         const botConfig = botConfigs && botConfigs.length > 0 ? botConfigs[0] : null;
 
                         if (botConfig && botConfig.is_active && botConfig.replies && botConfig.replies.length > 0) {
@@ -224,34 +241,43 @@ router.post("/", async (req, res) => {
                             if (currentStep < botConfig.replies.length) {
                                 const reply = botConfig.replies[currentStep];
 
-                                // 🔥 RACE-CONDITION FIX: මැසේජ් එක යවන්න කලින් Step එක අනිවාර්යයෙන්ම Update කරනවා
-                                await supabase.from('chat_sessions')
+                                const { error: sessionUpdateErr } = await supabase.from('chat_sessions')
                                     .update({ current_step: currentStep + 1, last_active: new Date(now).toISOString() })
                                     .eq('id', session.id);
+                                if (sessionUpdateErr) console.error("❌ DB Error updating session:", sessionUpdateErr);
 
-                                // 🔥 NEW: Bot යවපු මැසේජ් එකේ ID එක ගන්නවා
+                                console.log(`🚀 Sending Bot Reply (Step ${currentStep + 1})...`);
                                 const botMsgId = await sendWhatsAppMessage(client, from, reply);
 
-                                // Save Bot Message to Database
-                                await supabase.from('messages').insert([{
-                                    contact_id: contact.id,
-                                    owner_id: client.id,
-                                    text: reply.text || "Bot Media",
-                                    sender: "me",
-                                    direction: "outbound",
-                                    is_bot_reply: true,
-                                    type: reply.mediaType || 'text',
-                                    media_url: reply.media || null,
-                                    whatsapp_message_id: botMsgId // 🔥 NEW: Bot එවපු මැසේජ් එකේ ID එකත් Save කළා
-                                }]);
+                                if (botMsgId) {
+                                    await supabase.from('messages').insert([{
+                                        contact_id: contact.id,
+                                        owner_id: client.id,
+                                        text: reply.text || "Bot Media",
+                                        sender: "me",
+                                        direction: "outbound",
+                                        is_bot_reply: true,
+                                        type: reply.mediaType || 'text',
+                                        media_url: reply.media || null,
+                                        whatsapp_message_id: botMsgId
+                                    }]);
+                                    console.log(`✅ Bot reply sent & saved.`);
+                                } else {
+                                    console.log(`❌ Failed to send Bot reply via Meta.`);
+                                }
+                            } else {
+                                console.log(`✅ Flow completed. No more bot replies.`);
                             }
+                        } else {
+                            console.log(`🛑 Bot is OFF or has no replies set.`);
                         }
+                        console.log(`=========================================\n`);
                     }
                 }
             }
         }
     } catch (err) {
-        console.error("Webhook Error: ", err.message);
+        console.error("❌ Webhook Critical Error: ", err);
     }
 });
 
