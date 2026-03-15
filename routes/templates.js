@@ -139,25 +139,23 @@ router.post("/create", verifyToken, async (req, res) => {
 // 3. SEND TEMPLATE MESSAGE (For UserInbox)
 router.post("/send", verifyToken, async (req, res) => {
     try {
-        const { contactId, to, phoneNumber, templateName, language } = req.body;
+        console.log("📩 Received Template Payload:", req.body);
+        
+        const { contactId, to, templateName, language, components } = req.body;
 
-        // 🔥 FIX 1: Frontend එකෙන් එන 'to' හෝ 'phoneNumber' ගන්නවා.
-        let recipientPhone = to || phoneNumber;
+        let recipientPhone = to;
 
-        // 🔥 FIX 2: එහෙම ආවේ නැත්නම් කෙලින්ම Database එකෙන් නම්බර් එක අදිනවා (කවදාවත් වරදින්නේ නෑ)
         if (!recipientPhone && contactId) {
             console.log(`⚠️ Phone missing in request. Fetching from DB for Contact ID: ${contactId}`);
             const { data: contactData } = await supabase.from('contacts').select('phone_number').eq('id', contactId).single();
-            if (contactData) {
-                recipientPhone = contactData.phone_number;
-            }
+            if (contactData) recipientPhone = contactData.phone_number;
         }
 
         if (!recipientPhone) {
+            console.log("❌ Recipient phone number is missing completely.");
             return res.status(400).json({ message: "Recipient phone number is strictly required." });
         }
 
-        // 🔥 FIX 3: Meta API එකට යවන්න පුළුවන් ඉලක්කම් විතරයි. ඒ නිසා '+', '-' වගේ දේවල් අයින් කරනවා.
         recipientPhone = recipientPhone.toString().replace(/\D/g, '');
 
         let ownerId = req.user.id;
@@ -177,7 +175,7 @@ router.post("/send", verifyToken, async (req, res) => {
         let payload = {
             messaging_product: "whatsapp",
             recipient_type: "individual",
-            to: recipientPhone, // 🔥 දැන් 100% ක්ම හරියටම යනවා
+            to: recipientPhone, 
             type: "template",
             template: {
                 name: templateName,
@@ -185,7 +183,12 @@ router.post("/send", verifyToken, async (req, res) => {
             }
         };
 
-        console.log(`🚀 Sending Template to Meta API -> Phone: ${recipientPhone}`);
+        if (components && components.length > 0) {
+            payload.template.components = components;
+        }
+
+        console.log(`🚀 Sending Request to Meta -> Phone: ${recipientPhone} | Template: ${templateName}`);
+        console.log(JSON.stringify(payload, null, 2));
 
         await axios.post(url, payload, { headers });
 
@@ -208,7 +211,7 @@ router.post("/send", verifyToken, async (req, res) => {
 
     } catch (err) {
         console.error("❌ Send Template Error:", err.response ? JSON.stringify(err.response.data) : err.message);
-        res.status(500).json({ message: "Failed to send template to Meta API", details: err.response?.data });
+        res.status(500).json({ message: err.response?.data?.error?.message || "Failed to send template to Meta API", details: err.response?.data });
     }
 });
 
