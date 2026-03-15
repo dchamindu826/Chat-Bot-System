@@ -27,7 +27,7 @@ router.get("/contacts", verifyToken, async (req, res) => {
         .select('*')
         .eq('owner_id', targetOwnerId)
         .order('created_at', { ascending: false })
-        .limit(10000); 
+        .range(0, 9999);
 
     if (contactErr) throw contactErr;
 
