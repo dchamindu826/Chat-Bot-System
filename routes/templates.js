@@ -139,7 +139,26 @@ router.post("/create", verifyToken, async (req, res) => {
 // 3. SEND TEMPLATE MESSAGE (For UserInbox)
 router.post("/send", verifyToken, async (req, res) => {
     try {
-        const { contactId, to, templateName, language } = req.body;
+        const { contactId, to, phoneNumber, templateName, language } = req.body;
+
+        // 🔥 FIX 1: Frontend එකෙන් එන 'to' හෝ 'phoneNumber' ගන්නවා.
+        let recipientPhone = to || phoneNumber;
+
+        // 🔥 FIX 2: එහෙම ආවේ නැත්නම් කෙලින්ම Database එකෙන් නම්බර් එක අදිනවා (කවදාවත් වරදින්නේ නෑ)
+        if (!recipientPhone && contactId) {
+            console.log(`⚠️ Phone missing in request. Fetching from DB for Contact ID: ${contactId}`);
+            const { data: contactData } = await supabase.from('contacts').select('phone_number').eq('id', contactId).single();
+            if (contactData) {
+                recipientPhone = contactData.phone_number;
+            }
+        }
+
+        if (!recipientPhone) {
+            return res.status(400).json({ message: "Recipient phone number is strictly required." });
+        }
+
+        // 🔥 FIX 3: Meta API එකට යවන්න පුළුවන් ඉලක්කම් විතරයි. ඒ නිසා '+', '-' වගේ දේවල් අයින් කරනවා.
+        recipientPhone = recipientPhone.toString().replace(/\D/g, '');
 
         let ownerId = req.user.id;
         if (req.user.role === 'agent') {
@@ -149,7 +168,7 @@ router.post("/send", verifyToken, async (req, res) => {
 
         const { data: ownerUser } = await supabase.from('users').select('phone_number_id, access_token').eq('id', ownerId).single();
         if (!ownerUser || !ownerUser.phone_number_id) {
-            return res.status(400).json({ message: "Phone Number ID is missing" });
+            return res.status(400).json({ message: "Phone Number ID is missing in settings." });
         }
 
         const url = `https://graph.facebook.com/v17.0/${ownerUser.phone_number_id}/messages`;
@@ -158,13 +177,15 @@ router.post("/send", verifyToken, async (req, res) => {
         let payload = {
             messaging_product: "whatsapp",
             recipient_type: "individual",
-            to: to,
+            to: recipientPhone, // 🔥 දැන් 100% ක්ම හරියටම යනවා
             type: "template",
             template: {
                 name: templateName,
                 language: { code: language || "en_US" }
             }
         };
+
+        console.log(`🚀 Sending Template to Meta API -> Phone: ${recipientPhone}`);
 
         await axios.post(url, payload, { headers });
 
@@ -186,8 +207,8 @@ router.post("/send", verifyToken, async (req, res) => {
         res.status(200).json(savedMsg);
 
     } catch (err) {
-        console.error("Send Template Error:", err.response ? JSON.stringify(err.response.data) : err.message);
-        res.status(500).json({ message: "Failed to send template" });
+        console.error("❌ Send Template Error:", err.response ? JSON.stringify(err.response.data) : err.message);
+        res.status(500).json({ message: "Failed to send template to Meta API", details: err.response?.data });
     }
 });
 
