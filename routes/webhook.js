@@ -133,7 +133,7 @@ router.post("/", async (req, res) => {
 
                         // 🔥 Advanced Logging පටන් ගන්න තැන:
                         console.log(`\n=========================================`);
-                        console.log(`📩 Incoming message from: ${from} | Target Phone ID: [${phone_number_id}]`);
+                        console.log(`📩 Incoming message from: ${from} | Target Phone ID: [${phone_number_id}] | Type: ${msgType}`);
 
                         // 1. Check Client
                         const { data: clients, error: clientErr } = await supabase.from('users').select('*').eq('phone_number_id', phone_number_id).limit(1);
@@ -153,14 +153,26 @@ router.post("/", async (req, res) => {
                         let lastMessageText = ""; 
                         let finalMediaUrl = null;
 
+                        // =======================================================
+                        // 🔥 මෙතන තමයි අලුතින් Button Clicks අල්ලගන්න update කරේ 🔥
+                        // =======================================================
                         if (msgType === "text") {
                             msgBody = msgObj.text.body;
                             lastMessageText = msgBody;
                         } else if (msgType === "button") {
+                            // Quick Reply buttons වලට එන විදිහ
                             msgBody = msgObj.button.text;
                             lastMessageText = msgBody;
                         } else if (msgType === "interactive") {
-                            msgBody = msgObj.interactive.button_reply?.title || msgObj.interactive.list_reply?.title || "Interactive Reply";
+                            // List Messages හෝ අලුත් Button replies වලට එන විදිහ
+                            const interactiveType = msgObj.interactive.type;
+                            if (interactiveType === "button_reply") {
+                                msgBody = msgObj.interactive.button_reply.title;
+                            } else if (interactiveType === "list_reply") {
+                                msgBody = msgObj.interactive.list_reply.title;
+                            } else {
+                                msgBody = "Interactive Reply";
+                            }
                             lastMessageText = msgBody;
                         } else if (["image", "video", "audio", "document", "sticker"].includes(msgType)) {
                             const mediaObj = msgObj[msgType];
@@ -176,6 +188,7 @@ router.post("/", async (req, res) => {
                             msgBody = "";
                             lastMessageText = `📎 ${msgType}`;
                         }
+                        // =======================================================
 
                         // 2. Check/Create Contact
                         console.log(`👤 Checking contact...`);
@@ -205,13 +218,13 @@ router.post("/", async (req, res) => {
                         }
 
                         // 3. Save Message
-                        console.log(`💾 Saving message...`);
+                        console.log(`💾 Saving message: "${lastMessageText}"`);
                         const { error: msgSaveErr } = await supabase.from('messages').insert([{
                             contact_id: contact.id,
                             owner_id: client.id,
                             text: msgBody, 
                             sender: "customer",
-                            type: msgType,
+                            type: msgType === 'button' || msgType === 'interactive' ? 'text' : msgType, // Database එකේ text විදිහටම සේව් කරන්න
                             media_url: finalMediaUrl,
                             whatsapp_message_id: msgId
                         }]);
