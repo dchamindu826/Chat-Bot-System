@@ -58,21 +58,27 @@ router.post("/contact/add", verifyToken, async (req, res) => {
     try {
         const { phoneNumber, name } = req.body;
         
+        // 🔥 FIX: නම්බර් එක අනිවාර්යෙන්ම 94 න් පටන්ගන්න විදිහට හදනවා
+        let cleanPhone = phoneNumber.replace(/\D/g, '');
+        if (cleanPhone.startsWith('0')) {
+            cleanPhone = '94' + cleanPhone.substring(1);
+        }
+        
         let ownerId = req.user.id; 
         if (req.user.role && req.user.role.toLowerCase() === 'agent') {
             const { data: agentData } = await supabase.from('users').select('owner_id').eq('id', req.user.id).single();
             if (agentData && agentData.owner_id) ownerId = agentData.owner_id;
         }
 
-        const { data: existing } = await supabase.from('contacts').select('*').eq('phone_number', phoneNumber).eq('owner_id', ownerId).single();
+        const { data: existing } = await supabase.from('contacts').select('*').eq('phone_number', cleanPhone).eq('owner_id', ownerId).single();
         if (existing) {
             return res.status(200).json({ ...existing, _id: existing.id, phoneNumber: existing.phone_number });
         }
 
         const { data: newContact, error } = await supabase.from('contacts').insert([{
-            phone_number: phoneNumber,
+            phone_number: cleanPhone,
             owner_id: ownerId,
-            name: name || `Guest ${phoneNumber.slice(-4)}`,
+            name: name || `Guest ${cleanPhone.slice(-4)}`,
             assigned_to: req.user.role === 'agent' ? req.user.id : null,
             unread_count: 0,
             last_message: "Created Manually",
@@ -89,7 +95,7 @@ router.post("/contact/add", verifyToken, async (req, res) => {
 // 1.6 ADD BULK CONTACTS VIA CSV (CSV මගින් ගොඩක් එකතු කිරීම)
 router.post("/contact/bulk-add", verifyToken, async (req, res) => {
     try {
-        const { contacts } = req.body; // Array of { phoneNumber, name }
+        const { contacts } = req.body; 
         if (!contacts || !Array.isArray(contacts) || contacts.length === 0) {
             return res.status(400).json({ message: "No contacts provided" });
         }
@@ -100,15 +106,20 @@ router.post("/contact/bulk-add", verifyToken, async (req, res) => {
             if (agentData && agentData.owner_id) ownerId = agentData.owner_id;
         }
 
-        // කලින් තියෙන නම්බර්ස් අරගෙන, Duplicate වීම නවත්වනවා
         const { data: existingContacts } = await supabase.from('contacts').select('phone_number').eq('owner_id', ownerId);
         const existingPhones = new Set((existingContacts || []).map(c => c.phone_number));
 
         const newContactsToInsert = [];
-        const uniqueIncomingPhones = new Set(); // එකම CSV එකේ duplicate තිබ්බොත් අයින් කරන්න
+        const uniqueIncomingPhones = new Set(); 
 
         for (let c of contacts) {
-            const phone = c.phoneNumber?.replace(/\D/g, '');
+            let phone = c.phoneNumber?.replace(/\D/g, '');
+            
+            // 🔥 FIX: CSV එකෙන් එන නම්බර් එකත් 94 න් පටන්ගන්න විදිහට හදනවා
+            if (phone && phone.startsWith('0')) {
+                phone = '94' + phone.substring(1);
+            }
+
             if (phone && !existingPhones.has(phone) && !uniqueIncomingPhones.has(phone)) {
                 uniqueIncomingPhones.add(phone);
                 newContactsToInsert.push({
@@ -127,7 +138,6 @@ router.post("/contact/bulk-add", verifyToken, async (req, res) => {
             return res.status(200).json({ message: "No new contacts were added. All numbers might already exist." });
         }
 
-        // අලුත් ටික සේව් කරනවා
         const { data: insertedContacts, error } = await supabase.from('contacts').insert(newContactsToInsert).select();
         if (error) throw error;
 
@@ -139,6 +149,7 @@ router.post("/contact/bulk-add", verifyToken, async (req, res) => {
         res.status(500).json({ message: err.message });
     }
 });
+
 
 // 2. UPDATE CONTACT 
 router.put("/contact/:id", verifyToken, async (req, res) => {
