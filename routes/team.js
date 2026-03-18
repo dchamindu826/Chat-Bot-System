@@ -177,45 +177,61 @@ router.get("/agent-stats", verifyToken, async (req, res) => {
             ownerId = agentData.owner_id;
         }
 
-        // Frontend එකෙන් එවන Dates ගන්නවා. නැත්නම් අද දවස ගන්නවා.
+        // 1. Timezone Fix: ලංකාවේ වෙලාවට (+05:30) හරියටම දවස වෙන් කිරීම 
         const { startDate, endDate } = req.query;
-        let start = startDate ? new Date(startDate) : new Date();
-        let end = endDate ? new Date(endDate) : new Date();
+        const startD = startDate ? startDate.split('T')[0] : new Date().toISOString().split('T')[0];
+        const endD = endDate ? endDate.split('T')[0] : new Date().toISOString().split('T')[0];
+        
+        const startIso = `${startD}T00:00:00.000+05:30`;
+        const endIso = `${endD}T23:59:59.999+05:30`;
 
-        if (!startDate) start.setHours(0, 0, 0, 0); // අද පාන්දර 12:00
-        if (!endDate) end.setHours(23, 59, 59, 999); // අද රෑ 11:59
+        // 2. Agents ලට Assign කරපු Contacts ටික විතරක් ගැනීම
+        const { data: contacts } = await supabase
+            .from('contacts')
+            .select('id, assigned_to')
+            .eq('owner_id', ownerId)
+            .not('assigned_to', 'is', null); // Assign කරපු ඒවා විතරයි
 
-        // 1. Inbound Messages (කස්ටමර්ස්ලා එවපු ඒවා)
+        const contactAssignedMap = {};
+        contacts?.forEach(c => contactAssignedMap[c.id] = c.assigned_to);
+
+        // 3. අද දවසට ආපු Inbound Messages ගැනීම
         const { data: inboundMessages } = await supabase
             .from('messages')
             .select('contact_id')
             .eq('owner_id', ownerId)
             .eq('direction', 'inbound')
-            .gte('created_at', start.toISOString())
-            .lte('created_at', end.toISOString());
+            .gte('created_at', startIso)
+            .lte('created_at', endIso);
 
-        // කීදෙනෙක් මැසේජ් කරලා තියෙනවද (Unique Numbers)
-        const uniqueInboundNumbers = new Set(inboundMessages?.map(m => m.contact_id) || []).size;
+        // Assign කරලා තියෙන අංක වලින් ආපු අලුත් මැසේජ් ගාණ (New Numbers Received)
+        const assignedInbound = (inboundMessages || []).filter(m => contactAssignedMap[m.contact_id]);
+        const inboundContactIdsSet = new Set(assignedInbound.map(m => m.contact_id));
+        const uniqueInboundNumbers = inboundContactIdsSet.size;
 
-        // 2. Outbound Messages (අපි යවපු රිප්ලයි)
+        // 4. අද දවසට යවපු Outbound Messages ගැනීම
         const { data: outboundMessages } = await supabase
             .from('messages')
-            .select('contact_id, agent_name')
+            .select('id, contact_id, agent_name')
             .eq('owner_id', ownerId)
             .eq('direction', 'outbound')
-            .gte('created_at', start.toISOString())
-            .lte('created_at', end.toISOString());
+            .gte('created_at', startIso)
+            .lte('created_at', endIso);
 
-        // කීදෙනෙක්ට රිප්ලයි කරලා තියෙනවද (Unique Numbers)
-        const uniqueOutboundNumbers = new Set(outboundMessages?.map(m => m.contact_id) || []).size;
+        // Assign කරපු අංක වලට යවපු රිප්ලයි විතරක් පෙරා ගැනීම
+        const assignedOutbound = (outboundMessages || []).filter(m => contactAssignedMap[m.contact_id]);
+        
+        // අර ආපු "අලුත් අංක" වලට යවපු රිප්ලයි ගාණ (Total Numbers Replied)
+        const repliedToNewNumbersSet = new Set(assignedOutbound.filter(m => inboundContactIdsSet.has(m.contact_id)).map(m => m.contact_id));
+        const totalRepliedToNew = repliedToNewNumbersSet.size;
 
-        // 3. Response Rate ගණනය කිරීම
+        // Response Rate ගණනය
         let responseRate = 0;
         if (uniqueInboundNumbers > 0) {
-            responseRate = ((uniqueOutboundNumbers / uniqueInboundNumbers) * 100).toFixed(1);
+            responseRate = ((totalRepliedToNew / uniqueInboundNumbers) * 100).toFixed(1);
         }
 
-        // 4. Agent-wise Data ගැනීම
+        // 5. Agent-wise Data හැදීම
         const { data: agents } = await supabase
             .from('users')
             .select('id, name')
@@ -223,21 +239,31 @@ router.get("/agent-stats", verifyToken, async (req, res) => {
             .eq('role', 'agent');
 
         let agentStats = (agents || []).map(agent => {
-            const agentMessages = outboundMessages?.filter(m => m.agent_name === agent.name) || [];
-            const uniqueNumbersReplied = new Set(agentMessages.map(m => m.contact_id)).size;
+            // මේ Agent යවපු මැසේජ් ෆිල්ටර් කිරීම
+            const agentMessages = assignedOutbound.filter(m => {
+                // අලුත් මැසේජ් වල නම තියෙනවා නම් ඒකෙන් බලනවා
+                if (m.agent_name && m.agent_name.trim().toLowerCase() === agent.name.trim().toLowerCase()) {
+                    return true;
+                }
+                // පරණ මැසේජ් වල නම නැත්නම්, Contact එක Assign වෙලා ඉන්නෙ කාටද කියලා බලලා ඒකට අල්ලනවා
+                if (!m.agent_name && contactAssignedMap[m.contact_id] === agent.id) {
+                    return true;
+                }
+                return false;
+            });
 
             return {
                 agentId: agent.id,
                 agentName: agent.name,
-                messagesSent: agentMessages.length,
-                uniqueNumbersReplied: uniqueNumbersReplied
+                messagesSent: agentMessages.length, // Agent යවපු මුළු මැසේජ් 4ම මෙතනට එනවා
+                uniqueNumbersReplied: new Set(agentMessages.map(m => m.contact_id)).size // අංක කීයකට යැව්වද කියන එක
             };
         });
 
         res.status(200).json({
             summary: {
                 totalInbound: uniqueInboundNumbers,
-                totalReplied: uniqueOutboundNumbers,
+                totalReplied: totalRepliedToNew,
                 rate: responseRate
             },
             agents: agentStats
