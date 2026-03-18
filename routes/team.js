@@ -177,23 +177,21 @@ router.get("/agent-stats", verifyToken, async (req, res) => {
             ownerId = agentData.owner_id;
         }
 
-        // 1. Timezone Fix: ලංකාවේ වෙලාවට (+05:30) හරියටම දවස වෙන් කිරීම 
+        // Frontend එකෙන් එවන සම්පූර්ණ Date + Time එක අරගෙන ලංකාවේ වෙලාවට (+05:30) හදනවා
         const { startDate, endDate } = req.query;
-        const startD = startDate ? startDate.split('T')[0] : new Date().toISOString().split('T')[0];
-        const endD = endDate ? endDate.split('T')[0] : new Date().toISOString().split('T')[0];
         
-        const startIso = `${startD}T00:00:00.000+05:30`;
-        const endIso = `${endD}T23:59:59.999+05:30`;
+        const startIso = `${startDate}+05:30`;
+        const endIso = `${endDate}+05:30`;
 
         // 2. Agents ලට Assign කරපු Contacts ටික විතරක් ගැනීම
         const { data: contacts } = await supabase
             .from('contacts')
             .select('id, assigned_to')
             .eq('owner_id', ownerId)
-            .not('assigned_to', 'is', null); // Assign කරපු ඒවා විතරයි
+            .not('assigned_to', 'is', null);
 
         const contactAssignedMap = {};
-        contacts?.forEach(c => contactAssignedMap[c.id] = c.assigned_to);
+        contacts?.forEach(c => contactAssignedMap[c.id] = c.assigned_to)
 
         // 3. අද දවසට ආපු Inbound Messages ගැනීම
         const { data: inboundMessages } = await supabase
