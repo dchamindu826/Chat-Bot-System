@@ -260,69 +260,6 @@ router.get('/agent-performance', verifyToken, async (req, res) => {
   }
 });
 
-// GET AGENT STATISTICS
-router.get("/agent-stats", verifyToken, async (req, res) => {
-    try {
-        let ownerId = req.user.id;
-        if (req.user.role === 'agent') {
-            const { data: agentData } = await supabase.from('users').select('owner_id').eq('id', req.user.id).single();
-            ownerId = agentData.owner_id;
-        }
 
-        // 1. Get all assigned contacts for the owner
-        const { data: contacts } = await supabase
-            .from('contacts')
-            .select('id, assigned_to, unread_count')
-            .eq('owner_id', ownerId);
-
-        // 2. Get today's outbound messages
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-
-        const { data: messages } = await supabase
-            .from('messages')
-            .select('contact_id, agent_name')
-            .eq('owner_id', ownerId)
-            .eq('direction', 'outbound')
-            .gte('created_at', today.toISOString());
-
-        // 3. Get all agents
-        const { data: agents } = await supabase
-            .from('users')
-            .select('id, name')
-            .eq('owner_id', ownerId)
-            .eq('role', 'agent');
-
-        // Calculate Stats
-        let stats = agents.map(agent => {
-            // Agent ට assign කරපු contacts
-            const agentContacts = contacts.filter(c => c.assigned_to === agent.id);
-            
-            // ඒ assign කරපු ඒවගෙන් අලුත් messages ඇවිත් තියෙන (unread) ගාණ
-            const newMessagesCount = agentContacts.filter(c => c.unread_count > 0).length;
-
-            // Agent යවපු messages
-            const agentMessages = messages.filter(m => m.agent_name === agent.name);
-            
-            // Agent අද දවසේ reply කරපු unique numbers ගාණ
-            const uniqueNumbersReplied = new Set(agentMessages.map(m => m.contact_id)).size;
-
-            return {
-                agentId: agent.id,
-                agentName: agent.name,
-                assignedNumbers: agentContacts.length,
-                newMessagesToAssign: newMessagesCount,
-                messagesSentToday: agentMessages.length,
-                uniqueNumbersRepliedToday: uniqueNumbersReplied
-            };
-        });
-
-        res.status(200).json(stats);
-
-    } catch (err) {
-        console.error("Agent Stats Error:", err);
-        res.status(500).json({ message: err.message });
-    }
-});
 
 module.exports = router;

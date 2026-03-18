@@ -168,4 +168,85 @@ router.put("/reset-assignments", verifyToken, async (req, res) => {
     }
 });
 
+// GET AGENT STATISTICS WITH DATE FILTER
+router.get("/agent-stats", verifyToken, async (req, res) => {
+    try {
+        let ownerId = req.user.id;
+        if (req.user.role === 'agent') {
+            const { data: agentData } = await supabase.from('users').select('owner_id').eq('id', req.user.id).single();
+            ownerId = agentData.owner_id;
+        }
+
+        // Frontend එකෙන් එවන Dates ගන්නවා. නැත්නම් අද දවස ගන්නවා.
+        const { startDate, endDate } = req.query;
+        let start = startDate ? new Date(startDate) : new Date();
+        let end = endDate ? new Date(endDate) : new Date();
+
+        if (!startDate) start.setHours(0, 0, 0, 0); // අද පාන්දර 12:00
+        if (!endDate) end.setHours(23, 59, 59, 999); // අද රෑ 11:59
+
+        // 1. Inbound Messages (කස්ටමර්ස්ලා එවපු ඒවා)
+        const { data: inboundMessages } = await supabase
+            .from('messages')
+            .select('contact_id')
+            .eq('owner_id', ownerId)
+            .eq('direction', 'inbound')
+            .gte('created_at', start.toISOString())
+            .lte('created_at', end.toISOString());
+
+        // කීදෙනෙක් මැසේජ් කරලා තියෙනවද (Unique Numbers)
+        const uniqueInboundNumbers = new Set(inboundMessages?.map(m => m.contact_id) || []).size;
+
+        // 2. Outbound Messages (අපි යවපු රිප්ලයි)
+        const { data: outboundMessages } = await supabase
+            .from('messages')
+            .select('contact_id, agent_name')
+            .eq('owner_id', ownerId)
+            .eq('direction', 'outbound')
+            .gte('created_at', start.toISOString())
+            .lte('created_at', end.toISOString());
+
+        // කීදෙනෙක්ට රිප්ලයි කරලා තියෙනවද (Unique Numbers)
+        const uniqueOutboundNumbers = new Set(outboundMessages?.map(m => m.contact_id) || []).size;
+
+        // 3. Response Rate ගණනය කිරීම
+        let responseRate = 0;
+        if (uniqueInboundNumbers > 0) {
+            responseRate = ((uniqueOutboundNumbers / uniqueInboundNumbers) * 100).toFixed(1);
+        }
+
+        // 4. Agent-wise Data ගැනීම
+        const { data: agents } = await supabase
+            .from('users')
+            .select('id, name')
+            .eq('owner_id', ownerId)
+            .eq('role', 'agent');
+
+        let agentStats = (agents || []).map(agent => {
+            const agentMessages = outboundMessages?.filter(m => m.agent_name === agent.name) || [];
+            const uniqueNumbersReplied = new Set(agentMessages.map(m => m.contact_id)).size;
+
+            return {
+                agentId: agent.id,
+                agentName: agent.name,
+                messagesSent: agentMessages.length,
+                uniqueNumbersReplied: uniqueNumbersReplied
+            };
+        });
+
+        res.status(200).json({
+            summary: {
+                totalInbound: uniqueInboundNumbers,
+                totalReplied: uniqueOutboundNumbers,
+                rate: responseRate
+            },
+            agents: agentStats
+        });
+
+    } catch (err) {
+        console.error("Agent Stats Error:", err);
+        res.status(500).json({ message: err.message });
+    }
+});
+
 module.exports = router;
