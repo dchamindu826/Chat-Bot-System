@@ -49,6 +49,7 @@ router.get("/run-followups", async (req, res) => {
             .from('contacts')
             .select('id, phone_number, owner_id, last_message_time')
             .eq('followup_sent', false)
+            .gt('unread_count', 0) // 🔥 මෙන්න මේ අලුත් පේළිය දැම්මා (Unread/Reply නොකරපු අයට විතරක් යන්න)
             .lte('last_message_time', twentyHoursAgo) 
             .gte('last_message_time', twentyFourHoursAgo);
 
