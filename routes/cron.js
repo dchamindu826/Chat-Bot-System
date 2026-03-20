@@ -36,20 +36,20 @@ router.get("/run-followups", async (req, res) => {
         return res.status(403).json({ message: "Unauthorized Cron Access" });
     }
 
-    console.log("⏰ Cron Triggered: Checking for 23-Hour Follow-ups...");
+    console.log("⏰ Cron Triggered: Checking for Follow-ups...");
 
     try {
         const now = new Date();
-        // පැය 20 ටත් 24 ටත් අතර කාලය හොයනවා
-        const twentyFourHoursAgo = new Date(now.getTime() - 5 * 60 * 1000).toISOString(); // විනාඩි 5යි
-        const twentyHoursAgo = new Date(now.getTime() - 1 * 60 * 1000).toISOString(); // විනාඩි 1යි
+        // 🔥 TESTING සඳහා: විනාඩි 1 ත් 5 ත් අතර
+        const twentyFourHoursAgo = new Date(now.getTime() - 5 * 60 * 1000).toISOString(); 
+        const twentyHoursAgo = new Date(now.getTime() - 1 * 60 * 1000).toISOString(); 
 
-        // 2. පැය 20 පැන්න, ඒත් 24 පැනපු නැති, තාම follow up යවපු නැති Contacts හොයනවා
+        // 2. Contacts හොයනවා
         const { data: contacts, error } = await supabase
             .from('contacts')
             .select('id, phone_number, owner_id, last_message_time')
             .eq('followup_sent', false)
-            .lte('last_message_time', twentyHoursAgo) // 👈 මෙතනත් twentyHoursAgo කියලා නම වෙනස් කරා
+            .lte('last_message_time', twentyHoursAgo) 
             .gte('last_message_time', twentyFourHoursAgo);
 
         if (error) throw error;
@@ -65,9 +65,7 @@ router.get("/run-followups", async (req, res) => {
         // 3. Contacts ලූප් කරලා මැසේජ් යවනවා
         for (const contact of contacts) {
             
-            // 🔥🔥🔥 THE SAFETY LOCK (ගොඩක්ම වැදගත්) 🔥🔥🔥
-            // යවන්නත් කලින්ම Database එකේ true කියලා අප්ඩේට් කරනවා! 
-            // එතකොට මොකක් හරි වෙලා fail වුණත් ඊළඟ පාර ආයේ යවලා සල්ලි කපෙන්නේ නෑ!
+            // 🔥 SAFETY LOCK: Database එකේ true කියලා අප්ඩේට් කරනවා
             await supabase.from('contacts').update({ followup_sent: true }).eq('id', contact.id);
 
             // Owner ගේ WhatsApp Access Token එක ගන්නවා
@@ -89,7 +87,6 @@ router.get("/run-followups", async (req, res) => {
                 interactive: {
                     type: "button",
                     body: {
-                        // 👇 \n දාලා තියෙන්නේ ඊළඟ පේළියට කඩන්න
                         text: "ආයුබෝවන් පුතේ,\nඔයාගේ ගැටලුවට විසඳුමක් ලැබුණද ?" 
                     },
                     action: {
@@ -99,48 +96,37 @@ router.get("/run-followups", async (req, res) => {
                         ]
                     }
                 }
-            
             };
 
             try {
-                await axios.post(url, body, {
-                    headers: { Authorization: `Bearer ${clientData.access_token}`, "Content-Type": "application/json" }
-                });
-                successCount++;
-                console.log(`✅ Follow-up sent to ${contact.phone_number}`);
-            } catch (err) {
-                console.error(`❌ Follow-up failed for ${contact.phone_number}:`, err.response ? err.response.data : err.message);
-            }
-
-            try {
-                // 1. Meta එකට මැසේජ් එක යවනවා (දැනට තියෙන කෑල්ල)
+                // Meta එකට මැසේජ් එක යවනවා
                 const response = await axios.post(url, body, {
                     headers: { Authorization: `Bearer ${clientData.access_token}`, "Content-Type": "application/json" }
                 });
 
-                // Meta එකෙන් එන Message ID එක ගන්නවා (Delivery Status එක හරියටම අල්ලගන්න)
+                // Meta එකෙන් එන Message ID එක ගන්නවා
                 const metaMsgId = response.data.messages?.[0]?.id || null;
 
                 successCount++;
                 console.log(`✅ Follow-up sent to ${contact.phone_number}`);
 
-                // 🔥 2. අපේ Database එකේ Inbox එකට (messages table එකට) සේව් කරනවා
+                // අපේ Database එකේ Inbox එකට සේව් කරනවා
                 const { error: msgSaveErr } = await supabase.from('messages').insert([{
                     contact_id: contact.id,
                     owner_id: contact.owner_id,
-                    text: "ආයුබෝවන් පුතේ,\nඔයාගේ ගැටලුවට විසඳුමක් ලැබුණද ?\n\n[🔘 ඔව්] [🔘 නෑ]", // Inbox එකේ පේන විදිහ
+                    text: "ආයුබෝවන් පුතේ,\nඔයාගේ ගැටලුවට විසඳුමක් ලැබුණද ?\n\n[🔘 ඔව්] [🔘 නෑ]", 
                     sender: "me",
                     direction: "outbound",
-                    type: "text", // Button Message එකක් වුණත් අපි text විදිහටම සේව් කරමු ලේසි වෙන්න
+                    type: "text", 
                     whatsapp_message_id: metaMsgId,
-                    agent_name: "System (Auto Follow-up)" // කවුද යැව්වේ කියලා පැහැදිලි වෙන්න
+                    agent_name: "System (Auto Follow-up)" 
                 }]);
 
                 if (msgSaveErr) {
                     console.error(`❌ DB Error saving follow-up message for ${contact.phone_number}:`, msgSaveErr);
                 }
 
-                // අන්තිම මැසේජ් එක විදිහට Contacts ටේබල් එකෙත් Update කරනවා (එතකොට Chat List එකෙත් උඩින්ම පෙනෙයි)
+                // අන්තිම මැසේජ් එක විදිහට Contacts ටේබල් එකෙත් Update කරනවා
                 await supabase.from('contacts').update({
                     last_message: "Auto Follow-up Sent",
                     last_message_time: new Date().toISOString()
