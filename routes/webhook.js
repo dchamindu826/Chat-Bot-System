@@ -199,7 +199,11 @@ router.post("/", async (req, res) => {
 
                         if (!contact) {
                             const { data: newContacts, error: newContactErr } = await supabase.from('contacts').insert([{
-                                phone_number: from, owner_id: client.id, name: `Guest ${from.slice(-4)}`, unread_count: 1
+                                phone_number: from, 
+                                owner_id: client.id, 
+                                name: `Guest ${from.slice(-4)}`, 
+                                unread_count: 1,
+                                followup_sent: false // 🔥 අලුත් Contact එකක් හැදෙද්දිත් false කරනවා
                             }]).select().limit(1);
                             if (newContactErr) console.error("❌ DB Error creating contact:", newContactErr);
                             contact = newContacts && newContacts.length > 0 ? newContacts[0] : null;
@@ -207,7 +211,8 @@ router.post("/", async (req, res) => {
                             const { error: updateErr } = await supabase.from('contacts').update({
                                 last_message: lastMessageText,
                                 last_message_time: new Date().toISOString(),
-                                unread_count: (contact.unread_count || 0) + 1
+                                unread_count: (contact.unread_count || 0) + 1,
+                                followup_sent: false // 🔥 පරණ කෙනෙක් මැසේජ් කරද්දිත් ආයේ false කරනවා (Cron එකට අහුවෙන්න)
                             }).eq('id', contact.id);
                             if (updateErr) console.error("❌ DB Error updating contact:", updateErr);
                         }
