@@ -41,8 +41,8 @@ router.get("/run-followups", async (req, res) => {
     try {
         const now = new Date();
         // 🔥 TESTING සඳහා: විනාඩි 1 ත් 5 ත් අතර
-        const twentyFourHoursAgo = new Date(now.getTime() - 5 * 60 * 1000).toISOString(); 
-        const twentyHoursAgo = new Date(now.getTime() - 1 * 60 * 1000).toISOString(); 
+        const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString(); 
+        const twentyHoursAgo = new Date(now.getTime() - 20 * 60 * 60 * 1000).toISOString();
 
         // 2. Contacts හොයනවා
         const { data: contacts, error } = await supabase
