@@ -111,6 +111,44 @@ router.get("/run-followups", async (req, res) => {
             } catch (err) {
                 console.error(`❌ Follow-up failed for ${contact.phone_number}:`, err.response ? err.response.data : err.message);
             }
+
+            try {
+                // 1. Meta එකට මැසේජ් එක යවනවා (දැනට තියෙන කෑල්ල)
+                const response = await axios.post(url, body, {
+                    headers: { Authorization: `Bearer ${clientData.access_token}`, "Content-Type": "application/json" }
+                });
+
+                // Meta එකෙන් එන Message ID එක ගන්නවා (Delivery Status එක හරියටම අල්ලගන්න)
+                const metaMsgId = response.data.messages?.[0]?.id || null;
+
+                successCount++;
+                console.log(`✅ Follow-up sent to ${contact.phone_number}`);
+
+                // 🔥 2. අපේ Database එකේ Inbox එකට (messages table එකට) සේව් කරනවා
+                const { error: msgSaveErr } = await supabase.from('messages').insert([{
+                    contact_id: contact.id,
+                    owner_id: contact.owner_id,
+                    text: "ආයුබෝවන් පුතේ,\nඔයාගේ ගැටලුවට විසඳුමක් ලැබුණද ?\n\n[🔘 ඔව්] [🔘 නෑ]", // Inbox එකේ පේන විදිහ
+                    sender: "me",
+                    direction: "outbound",
+                    type: "text", // Button Message එකක් වුණත් අපි text විදිහටම සේව් කරමු ලේසි වෙන්න
+                    whatsapp_message_id: metaMsgId,
+                    agent_name: "System (Auto Follow-up)" // කවුද යැව්වේ කියලා පැහැදිලි වෙන්න
+                }]);
+
+                if (msgSaveErr) {
+                    console.error(`❌ DB Error saving follow-up message for ${contact.phone_number}:`, msgSaveErr);
+                }
+
+                // අන්තිම මැසේජ් එක විදිහට Contacts ටේබල් එකෙත් Update කරනවා (එතකොට Chat List එකෙත් උඩින්ම පෙනෙයි)
+                await supabase.from('contacts').update({
+                    last_message: "Auto Follow-up Sent",
+                    last_message_time: new Date().toISOString()
+                }).eq('id', contact.id);
+
+            } catch (err) {
+                console.error(`❌ Follow-up failed for ${contact.phone_number}:`, err.response ? err.response.data : err.message);
+            }
         }
 
         res.status(200).json({ message: `Follow-up process completed. Sent: ${successCount}` });
