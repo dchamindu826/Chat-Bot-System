@@ -39,17 +39,30 @@ router.get("/run-followups", async (req, res) => {
     console.log("⏰ Cron Triggered: Checking for Follow-ups...");
 
     try {
-        const now = new Date();
-        // 🔥 TESTING සඳහා: විනාඩි 1 ත් 5 ත් අතර
-        const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString(); 
-        const twentyHoursAgo = new Date(now.getTime() - 20 * 60 * 60 * 1000).toISOString();
+        // 🔥 1. මුලින්ම Auto Follow-up On කරලා තියෙන Business (Users) ටික හොයාගන්නවා
+        const { data: enabledUsers, error: userErr } = await supabase
+            .from('users')
+            .select('id')
+            .eq('auto_followup_enabled', true);
 
-        // 2. Contacts හොයනවා
+        if (userErr || !enabledUsers || enabledUsers.length === 0) {
+            return res.status(200).json({ message: "No businesses have follow-up enabled right now." });
+        }
+
+        const enabledOwnerIds = enabledUsers.map(u => u.id); // On කරපු අයගේ ID ටික
+
+        const now = new Date();
+         const twentyFourHoursAgo = new Date(now.getTime() - 5 * 60 * 1000).toISOString(); // විනාඩි 5යි
+
+        const twentyHoursAgo = new Date(now.getTime() - 1 * 60 * 1000).toISOString(); // විනාඩි 1යි
+
+        // 🔥 2. ඒ On කරපු අයගේ Contacts විතරක් ෆිල්ටර් කරනවා
         const { data: contacts, error } = await supabase
             .from('contacts')
             .select('id, phone_number, owner_id, last_message_time')
             .eq('followup_sent', false)
-            .gt('unread_count', 0) // 🔥 මෙන්න මේ අලුත් පේළිය දැම්මා (Unread/Reply නොකරපු අයට විතරක් යන්න)
+            .gt('unread_count', 0) 
+            .in('owner_id', enabledOwnerIds) // 👈 මෙන්න මේකෙන් තමා On කරපු අයට විතරක් යවන්නේ
             .lte('last_message_time', twentyHoursAgo) 
             .gte('last_message_time', twentyFourHoursAgo);
 
