@@ -129,24 +129,18 @@ router.put("/client/:id", async (req, res) => {
 });
 
 // 🔥 අලුත් UPDATE SETTINGS Route එක (අර duplicate import කෑලි අයින් කරලා)
-router.put("/update-settings", async (req, res) => {
+router.put("/update-settings", verifyToken, async (req, res) => {
     try {
         const { auto_followup_enabled } = req.body;
 
-        // 1. Frontend එකෙන් එවන Token එක ගන්නවා
-        const authHeader = req.headers.token;
-        if (!authHeader) return res.status(401).json({ error: "No token provided" });
+        // verifyToken එකෙන් අනිවාර්යයෙන්ම Token එක චෙක් කරලා හරිනම් req.user එකට ඩේටා ටික දෙනවා
+        const userId = req.user.id || req.user._id;
 
-        const token = authHeader.split(" ")[1] || authHeader;
+        if (!userId) {
+            return res.status(400).json({ error: "Invalid user data from token" });
+        }
 
-        // 2. Token එක Decode කරලා අදාල User ගේ ID එක හොයාගන්නවා
-        const decoded = jwt.verify(token, process.env.JWT_SECRET || process.env.JWT_SEC); 
-        const userId = decoded.id || decoded._id;
-
-        if (!userId) return res.status(400).json({ error: "Invalid token data" });
-
-        // 3. Supabase එකේ 'users' table එක Update කරනවා
-        // මෙතන අපි උඩ හදපු `supabase` instance එක පාවිච්චි කරනවා
+        // Supabase එකේ 'users' table එක Update කරනවා
         const { error } = await supabase
             .from('users')
             .update({ auto_followup_enabled: auto_followup_enabled })
