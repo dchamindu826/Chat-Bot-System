@@ -52,8 +52,8 @@ router.get("/run-followups", async (req, res) => {
         const enabledOwnerIds = enabledUsers.map(u => u.id); // On කරපු අයගේ ID ටික
 
         const now = new Date();
-         const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString(); 
-         const twentyHoursAgo = new Date(now.getTime() - 20 * 60 * 60 * 1000).toISOString();
+         const twentyFourHoursAgo = new Date(now.getTime() - 5 * 60 * 1000).toISOString(); // විනාඩි 5යි
+        const twentyHoursAgo = new Date(now.getTime() - 1 * 60 * 1000).toISOString(); // විනාඩි 1යි
 
         // 2. Contacts හොයනවා (🔥 TESTING ONLY: ඔයාගේ නම්බර් එකට විතරක්)
         const { data: contacts, error } = await supabase
