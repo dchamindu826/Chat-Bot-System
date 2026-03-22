@@ -128,6 +128,24 @@ router.put("/client/:id", async (req, res) => {
     }
 });
 
+// 🔥 අලුත් GET SETTINGS Route එක (පේජ් එක ලෝඩ් වෙද්දි Button එකේ තත්වෙ බලාගන්න)
+router.get("/settings", verifyToken, async (req, res) => {
+    try {
+        const userId = req.user.id || req.user._id;
+        const { data, error } = await supabase
+            .from('users')
+            .select('auto_followup_enabled')
+            .eq('id', userId)
+            .single();
+
+        if (error) throw error;
+        res.status(200).json({ auto_followup_enabled: data.auto_followup_enabled });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+
 // 🔥 අලුත් UPDATE SETTINGS Route එක (අර duplicate import කෑලි අයින් කරලා)
 router.put("/update-settings", verifyToken, async (req, res) => {
     try {
