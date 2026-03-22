@@ -55,13 +55,14 @@ router.get("/run-followups", async (req, res) => {
          const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString(); 
          const twentyHoursAgo = new Date(now.getTime() - 20 * 60 * 60 * 1000).toISOString();
 
-        // 🔥 2. ඒ On කරපු අයගේ Contacts විතරක් ෆිල්ටර් කරනවා
+        // 2. Contacts හොයනවා (🔥 TESTING ONLY: ඔයාගේ නම්බර් එකට විතරක්)
         const { data: contacts, error } = await supabase
             .from('contacts')
             .select('id, phone_number, owner_id, last_message_time')
             .eq('followup_sent', false)
             .gt('unread_count', 0) 
-            .in('owner_id', enabledOwnerIds) // 👈 මෙන්න මේකෙන් තමා On කරපු අයට විතරක් යවන්නේ
+            .in('owner_id', enabledOwnerIds)
+            .eq('phone_number', '94714941559') // 👈 මෙතන ඔයාගේ WhatsApp නම්බර් එක දාන්න (Country Code එකත් එක්ක)
             .lte('last_message_time', twentyHoursAgo) 
             .gte('last_message_time', twentyFourHoursAgo);
 
