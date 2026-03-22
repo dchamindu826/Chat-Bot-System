@@ -1,8 +1,8 @@
 const router = require("express").Router();
 const { createClient } = require("@supabase/supabase-js");
 const CryptoJS = require("crypto-js");
-const jwt = require("jsonwebtoken"); // මේක අලුතෙන් දාන්න
-const { verifyToken } = require("../verifyToken"); // මේක අලුතෙන් දාන්න
+const jwt = require("jsonwebtoken"); 
+const { verifyToken } = require("../verifyToken"); 
 
 // Supabase Connection
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
@@ -128,10 +128,7 @@ router.put("/client/:id", async (req, res) => {
     }
 });
 
-
-const jwt = require("jsonwebtoken");
-const supabase = require("../supabase"); // ෆයිල් එකේ උඩ Supabase import කරලා නැත්නම් මේක ඕනේ වෙනවා
-
+// 🔥 අලුත් UPDATE SETTINGS Route එක (අර duplicate import කෑලි අයින් කරලා)
 router.put("/update-settings", async (req, res) => {
     try {
         const { auto_followup_enabled } = req.body;
@@ -143,13 +140,13 @@ router.put("/update-settings", async (req, res) => {
         const token = authHeader.split(" ")[1] || authHeader;
 
         // 2. Token එක Decode කරලා අදාල User ගේ ID එක හොයාගන්නවා
-        // (ඔයාගේ .env ෆයිල් එකේ තියෙන JWT Secret Key එකේ නම මෙතනට ගැලපෙන්න ඕනේ)
         const decoded = jwt.verify(token, process.env.JWT_SECRET || process.env.JWT_SEC); 
         const userId = decoded.id || decoded._id;
 
         if (!userId) return res.status(400).json({ error: "Invalid token data" });
 
         // 3. Supabase එකේ 'users' table එක Update කරනවා
+        // මෙතන අපි උඩ හදපු `supabase` instance එක පාවිච්චි කරනවා
         const { error } = await supabase
             .from('users')
             .update({ auto_followup_enabled: auto_followup_enabled })
