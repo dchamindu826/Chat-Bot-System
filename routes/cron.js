@@ -1,6 +1,6 @@
 const router = require("express").Router();
 const axios = require("axios");
-const supabase = require("../supabase"); // 🔥 Supabase Import කරා
+const supabase = require("../supabase");
 const Broadcast = require("../models/Broadcast");
 const User = require("../models/User");
 
@@ -17,7 +17,7 @@ const getHeaderType = (url) => {
 };
 
 // ==========================================
-// 1. පරණ Broadcast Cron එක (වෙනසක් නෑ)
+// 1. පරණ Broadcast Cron එක
 // ==========================================
 router.get("/run", async (req, res) => {
     // ... (ඔයාගේ පරණ Broadcast කෝඩ් එක ඒ විදිහටම තියන්න) ...
@@ -28,7 +28,7 @@ router.get("/run", async (req, res) => {
 });
 
 // ==========================================
-// 2. අලුත් 23-Hour Follow-Up Cron එක 🔥
+// 2. අලුත් 20-Hour Follow-Up Cron එක 🔥 (PRODUCTION READY)
 // ==========================================
 router.get("/run-followups", async (req, res) => {
     // 1. Security Check
@@ -36,7 +36,7 @@ router.get("/run-followups", async (req, res) => {
         return res.status(403).json({ message: "Unauthorized Cron Access" });
     }
 
-    console.log("⏰ Cron Triggered: Checking for Follow-ups...");
+    console.log("⏰ Cron Triggered: Checking for 20-Hour Follow-ups...");
 
     try {
         // 🔥 1. මුලින්ම Auto Follow-up On කරලා තියෙන Business (Users) ටික හොයාගන්නවා
@@ -52,17 +52,18 @@ router.get("/run-followups", async (req, res) => {
         const enabledOwnerIds = enabledUsers.map(u => u.id); // On කරපු අයගේ ID ටික
 
         const now = new Date();
-         const twentyFourHoursAgo = new Date(now.getTime() - 5 * 60 * 1000).toISOString(); // විනාඩි 5යි
-        const twentyHoursAgo = new Date(now.getTime() - 1 * 60 * 1000).toISOString(); // විනාඩි 1යි
+        
+        // 🔥 PRODUCTION: පැය 20 ටත් පැය 24 ටත් අතර කාලය
+        const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString(); 
+        const twentyHoursAgo = new Date(now.getTime() - 20 * 60 * 60 * 1000).toISOString(); 
 
-        // 2. Contacts හොයනවා (🔥 TESTING ONLY: ඔයාගේ නම්බර් එකට විතරක්)
+        // 🔥 2. Contacts හොයනවා (අපෙන් රිප්ලයි නොකරපු අයට විතරයි යන්නේ)
         const { data: contacts, error } = await supabase
             .from('contacts')
             .select('id, phone_number, owner_id, last_message_time')
             .eq('followup_sent', false)
             .gt('unread_count', 0) 
             .in('owner_id', enabledOwnerIds)
-            .eq('phone_number', '94714941559') // 👈 මෙතන ඔයාගේ WhatsApp නම්බර් එක දාන්න (Country Code එකත් එක්ක)
             .lte('last_message_time', twentyHoursAgo) 
             .gte('last_message_time', twentyFourHoursAgo);
 
