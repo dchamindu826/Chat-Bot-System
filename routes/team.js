@@ -31,28 +31,46 @@ router.post("/add-agent", verifyToken, async (req, res) => {
   }
 });
 
-// 🔥 2. GET AGENTS LIST
+// 🔥 2. GET AGENTS LIST (FIXED: Agents can see other agents too)
 router.get("/agents", verifyToken, async (req, res) => {
   try {
+    // 1. මුලින්ම බලනවා ලොග් වෙලා ඉන්න කෙනා කවුද කියලා
+    let ownerId = req.user.id;
+    
+    if (req.user.role === 'agent') {
+        // Agent කෙනෙක් නම්, එයාගේ Owner (Admin) ගේ ID එක හොයාගන්නවා
+        const { data: agentData } = await supabase
+            .from('users')
+            .select('owner_id')
+            .eq('id', req.user.id)
+            .single();
+            
+        if (agentData && agentData.owner_id) {
+            ownerId = agentData.owner_id;
+        }
+    }
+
+    // 2. ඒ Owner ට අයිති ඔක්කොම Agents ලාව අදිනවා
     const { data: agents, error: agentErr } = await supabase
         .from('users')
         .select('*')
-        .eq('owner_id', req.user.id)
+        .eq('owner_id', ownerId)
         .eq('role', 'agent');
 
     if (agentErr) throw agentErr;
 
+    // 3. Agents ලට Assign වෙච්ච ගණන් හදනවා
     const agentsWithCounts = await Promise.all((agents || []).map(async (agent) => {
         const { count: totalAssigned } = await supabase
             .from('contacts')
             .select('*', { count: 'exact', head: true })
-            .eq('owner_id', req.user.id)
+            .eq('owner_id', ownerId)
             .eq('assigned_to', agent.id);
 
         const { count: coveredCount } = await supabase
             .from('contacts')
             .select('*', { count: 'exact', head: true })
-            .eq('owner_id', req.user.id)
+            .eq('owner_id', ownerId)
             .eq('assigned_to', agent.id)
             .neq('call_status', 'Pending');
         
