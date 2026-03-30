@@ -139,23 +139,16 @@ router.post("/create", verifyToken, async (req, res) => {
 // 3. SEND TEMPLATE MESSAGE (For UserInbox)
 router.post("/send", verifyToken, async (req, res) => {
     try {
-        console.log("📩 Received Template Payload:", req.body);
-        
-        const { contactId, to, templateName, language, components } = req.body;
+        const { contactId, to, templateName, language, components, templateBodyText, templateMediaUrl } = req.body;
 
         let recipientPhone = to;
 
         if (!recipientPhone && contactId) {
-            console.log(`⚠️ Phone missing in request. Fetching from DB for Contact ID: ${contactId}`);
             const { data: contactData } = await supabase.from('contacts').select('phone_number').eq('id', contactId).single();
             if (contactData) recipientPhone = contactData.phone_number;
         }
 
-        if (!recipientPhone) {
-            console.log("❌ Recipient phone number is missing completely.");
-            return res.status(400).json({ message: "Recipient phone number is strictly required." });
-        }
-
+        if (!recipientPhone) return res.status(400).json({ message: "Recipient phone number is strictly required." });
         recipientPhone = recipientPhone.toString().replace(/\D/g, '');
 
         let ownerId = req.user.id;
@@ -187,23 +180,22 @@ router.post("/send", verifyToken, async (req, res) => {
             payload.template.components = components;
         }
 
-        console.log(`🚀 Sending Request to Meta -> Phone: ${recipientPhone} | Template: ${templateName}`);
-        console.log(JSON.stringify(payload, null, 2));
-
+        // Meta API එකට යවනවා
         await axios.post(url, payload, { headers });
 
-        // Save sent message to database
+        // 🔥 Save sent message to database (දැන් Save වෙන්නේ ඇත්තම Text එකයි Image එකයි!)
         const { data: savedMsg } = await supabase.from('messages').insert([{
             contact_id: contactId,
             owner_id: ownerId,
-            text: `[Template Sent: ${templateName}]`,
+            text: templateBodyText || `[Template Sent: ${templateName}]`, 
+            media_url: templateMediaUrl || null,
             sender: "me",
             direction: "outbound",
-            type: "template"
+            type: templateMediaUrl ? "image" : "text" // UI එකේ පින්තූරෙත් එක්කම ලස්සනට පේන්න
         }]).select().single();
 
         await supabase.from('contacts').update({ 
-            last_message: `Sent Template: ${templateName}`, 
+            last_message: templateBodyText ? (templateBodyText.substring(0, 40) + "...") : `Sent Template: ${templateName}`, 
             last_message_time: new Date().toISOString() 
         }).eq('id', contactId);
 
@@ -212,6 +204,35 @@ router.post("/send", verifyToken, async (req, res) => {
     } catch (err) {
         console.error("❌ Send Template Error:", err.response ? JSON.stringify(err.response.data) : err.message);
         res.status(500).json({ message: err.response?.data?.error?.message || "Failed to send template to Meta API", details: err.response?.data });
+    }
+});
+
+// 4. DELETE TEMPLATE (FROM META & CRM)
+router.delete("/:name", verifyToken, async (req, res) => {
+    try {
+        let ownerId = req.user.id;
+        if (req.user.role === 'agent') {
+            const { data: agentData } = await supabase.from('users').select('owner_id').eq('id', req.user.id).single();
+            if (agentData && agentData.owner_id) ownerId = agentData.owner_id;
+        }
+
+        const { data: ownerUser } = await supabase.from('users').select('waba_id, access_token').eq('id', ownerId).single();
+        if (!ownerUser || !ownerUser.waba_id) {
+            return res.status(400).json({ message: "WABA ID missing in settings." });
+        }
+
+        const templateName = req.params.name;
+        
+        // Meta API Call to Delete Template
+        const url = `https://graph.facebook.com/v18.0/${ownerUser.waba_id}/message_templates?name=${templateName}`;
+        await axios.delete(url, {
+            headers: { Authorization: `Bearer ${ownerUser.access_token}` }
+        });
+
+        res.status(200).json({ message: "Template deleted successfully from Meta!" });
+    } catch (err) {
+        console.error("Delete Template Error:", err.response ? err.response.data : err.message);
+        res.status(500).json({ message: "Failed to delete template", details: err.response?.data });
     }
 });
 
