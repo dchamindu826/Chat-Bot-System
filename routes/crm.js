@@ -195,4 +195,26 @@ router.put("/update-status/:id", verifyToken, async (req, res) => {
     } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
+// 🔥 Mark All Messages as Read (For Manager)
+router.put("/mark-all-read", verifyToken, async (req, res) => {
+    try {
+        // Agent කෙනෙක් මේක ඔබන්න හැදුවොත් නවත්තනවා (Security)
+        if (req.user.role === 'agent') return res.status(403).json({ message: "Access Denied" });
+
+        // Database එකේ අදාල Admin ගේ ඔක්කොම Unread ගාණ 0 කරනවා
+        const { error } = await supabase
+            .from('contacts')
+            .update({ unread_count: 0 })
+            .eq('owner_id', req.user.id)
+            .gt('unread_count', 0); // 0 ට වඩා වැඩි ඒවා විතරක් Update කරනවා
+
+        if (error) throw error;
+        res.status(200).json({ message: "All messages marked as read successfully!" });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: err.message });
+    }
+});
+
+
 module.exports = router;
