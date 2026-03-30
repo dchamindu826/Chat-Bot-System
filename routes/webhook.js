@@ -131,7 +131,6 @@ router.post("/", async (req, res) => {
                             continue;
                         }
 
-                        // 🔥 Advanced Logging පටන් ගන්න තැන:
                         console.log(`\n=========================================`);
                         console.log(`📩 Incoming message from: ${from} | Target Phone ID: [${phone_number_id}] | Type: ${msgType}`);
 
@@ -153,18 +152,13 @@ router.post("/", async (req, res) => {
                         let lastMessageText = ""; 
                         let finalMediaUrl = null;
 
-                        // =======================================================
-                        // 🔥 මෙතන තමයි අලුතින් Button Clicks අල්ලගන්න update කරේ 🔥
-                        // =======================================================
                         if (msgType === "text") {
                             msgBody = msgObj.text.body;
                             lastMessageText = msgBody;
                         } else if (msgType === "button") {
-                            // Quick Reply buttons වලට එන විදිහ
                             msgBody = msgObj.button.text;
                             lastMessageText = msgBody;
                         } else if (msgType === "interactive") {
-                            // List Messages හෝ අලුත් Button replies වලට එන විදිහ
                             const interactiveType = msgObj.interactive.type;
                             if (interactiveType === "button_reply") {
                                 msgBody = msgObj.interactive.button_reply.title;
@@ -188,7 +182,12 @@ router.post("/", async (req, res) => {
                             msgBody = "";
                             lastMessageText = `📎 ${msgType}`;
                         }
+                        
                         // =======================================================
+                        // 🔥 FIX: Clean out PostgreSQL Null Bytes (\u0000) to prevent Database Crashes!
+                        // =======================================================
+                        msgBody = msgBody ? msgBody.replace(/\0/g, '') : "";
+                        lastMessageText = lastMessageText ? lastMessageText.replace(/\0/g, '') : "";
 
                         // 2. Check/Create Contact
                         console.log(`👤 Checking contact...`);
@@ -203,7 +202,7 @@ router.post("/", async (req, res) => {
                                 owner_id: client.id, 
                                 name: `Guest ${from.slice(-4)}`, 
                                 unread_count: 1,
-                                followup_sent: false // 🔥 අලුත් Contact එකක් හැදෙද්දිත් false කරනවා
+                                followup_sent: false 
                             }]).select().limit(1);
                             if (newContactErr) console.error("❌ DB Error creating contact:", newContactErr);
                             contact = newContacts && newContacts.length > 0 ? newContacts[0] : null;
@@ -212,7 +211,7 @@ router.post("/", async (req, res) => {
                                 last_message: lastMessageText,
                                 last_message_time: new Date().toISOString(),
                                 unread_count: (contact.unread_count || 0) + 1,
-                                followup_sent: false // 🔥 පරණ කෙනෙක් මැසේජ් කරද්දිත් ආයේ false කරනවා (Cron එකට අහුවෙන්න)
+                                followup_sent: false 
                             }).eq('id', contact.id);
                             if (updateErr) console.error("❌ DB Error updating contact:", updateErr);
                         }
@@ -229,7 +228,7 @@ router.post("/", async (req, res) => {
                             owner_id: client.id,
                             text: msgBody, 
                             sender: "customer",
-                            type: msgType === 'button' || msgType === 'interactive' ? 'text' : msgType, // Database එකේ text විදිහටම සේව් කරන්න
+                            type: msgType === 'button' || msgType === 'interactive' ? 'text' : msgType, 
                             media_url: finalMediaUrl,
                             whatsapp_message_id: msgId
                         }]);
