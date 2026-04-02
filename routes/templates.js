@@ -3,7 +3,7 @@ const axios = require("axios");
 const supabase = require("../supabase");
 const { verifyToken } = require("../verifyToken");
 
-// 🔥 HELPER: Upload File to Meta & Get Handle (For Images/Videos/Docs in Templates)
+// 🔥 HELPER: Upload File to Meta & Get Handle
 const uploadToMeta = async (fileUrl, accessToken) => {
     try {
         const debugRes = await axios.get(`https://graph.facebook.com/v18.0/debug_token`, {
@@ -32,7 +32,6 @@ const uploadToMeta = async (fileUrl, accessToken) => {
         });
 
         return handleRes.data.h;
-
     } catch (error) {
         console.error("❌ Meta Upload Failed:", error.response ? error.response.data : error.message);
         return null;
@@ -44,13 +43,11 @@ router.get("/", verifyToken, async (req, res) => {
     try {
         let ownerId = req.user.id;
         
-        // Agent කෙනෙක් නම්, Owner ගේ ID එක හොයාගන්නවා
         if (req.user.role === 'agent') {
             const { data: agentData } = await supabase.from('users').select('owner_id').eq('id', req.user.id).single();
             if (agentData && agentData.owner_id) ownerId = agentData.owner_id;
         }
 
-        // Owner ගේ WABA ID සහ Token එක ගන්නවා
         const { data: ownerUser, error: ownerErr } = await supabase.from('users').select('waba_id, access_token').eq('id', ownerId).single();
         
         if (ownerErr || !ownerUser || !ownerUser.waba_id) {
@@ -61,17 +58,16 @@ router.get("/", verifyToken, async (req, res) => {
         const response = await axios.get(url, { headers: { Authorization: `Bearer ${ownerUser.access_token}` } });
 
         res.status(200).json(response.data.data);
-
     } catch (err) {
-        console.error("Fetch Templates Error:", err.response ? err.response.data : err.message);
         res.status(500).json({ message: "Failed to fetch templates from Meta" });
     }
 });
 
-// 2. CREATE TEMPLATE
+// 2. CREATE TEMPLATE (WITH BUTTONS)
 router.post("/create", verifyToken, async (req, res) => {
     try {
-        const { name, category, language, bodyText, headerType, headerText, footerText, headerUrl } = req.body;
+        // 🔥 NEW: Extract 'buttons' from body
+        const { name, category, language, bodyText, headerType, headerText, footerText, headerUrl, buttons } = req.body;
         
         let ownerId = req.user.id;
         if (req.user.role === 'agent') {
@@ -105,17 +101,24 @@ router.post("/create", verifyToken, async (req, res) => {
 
         // --- B. BODY COMPONENT ---
         let bodyComponent = { type: "BODY", text: bodyText };
-        
         const variableCount = (bodyText.match(/{{/g) || []).length;
         if (variableCount > 0) {
             const bodyExamples = Array.from({ length: variableCount }, (_, i) => `SampleData`);
             bodyComponent.example = { body_text: [bodyExamples] };
         }
-        
         components.push(bodyComponent);
         
         // --- C. FOOTER COMPONENT ---
         if (footerText) components.push({ type: "FOOTER", text: footerText });
+
+        // --- D. BUTTONS COMPONENT 🔥 ---
+        if (buttons && Array.isArray(buttons) && buttons.length > 0) {
+            let buttonComponents = buttons.map(btn => ({
+                type: "QUICK_REPLY",
+                text: btn.text
+            }));
+            components.push({ type: "BUTTONS", buttons: buttonComponents });
+        }
 
         const body = {
             name: name.toLowerCase(),
@@ -132,15 +135,13 @@ router.post("/create", verifyToken, async (req, res) => {
         res.status(201).json({ message: "Template Submitted!", data: response.data });
     } catch (err) {
         console.error("Create Template Error:", err.response ? JSON.stringify(err.response.data) : err.message);
-        res.status(500).json({ message: "Error creating template", details: err.response?.data });
+        res.status(500).json({ message: err.response?.data?.error?.error_user_msg || "Error creating template in Meta", details: err.response?.data });
     }
 });
 
-// 3. SEND TEMPLATE MESSAGE (For UserInbox)
+// 3. SEND TEMPLATE MESSAGE
 router.post("/send", verifyToken, async (req, res) => {
     try {
-        console.log("📩 Received Template Payload:", JSON.stringify(req.body, null, 2));
-
         const { contactId, to, templateName, language, components, templateBodyText, templateMediaUrl } = req.body;
 
         let recipientPhone = to;
@@ -181,16 +182,13 @@ router.post("/send", verifyToken, async (req, res) => {
             payload.template.components = components;
         }
 
-        console.log(`🚀 Sending Request to Meta -> Phone: ${recipientPhone} | Template: ${templateName}`);
-
         // Meta එකට යවනවා
         await axios.post(url, payload, { headers });
 
-        // 🔥 FIX FOR POSTGRESQL \u0000 ERROR (Database Crash වෙන එක නවත්තනවා)
         const sanitizedBodyText = templateBodyText ? templateBodyText.replace(/\0/g, '') : `[Template Sent: ${templateName}]`;
 
         // Database එකේ Save කරනවා
-        const { data: savedMsg, error: insertError } = await supabase.from('messages').insert([{
+        const { data: savedMsg } = await supabase.from('messages').insert([{
             contact_id: contactId,
             owner_id: ownerId,
             text: sanitizedBodyText, 
@@ -200,10 +198,6 @@ router.post("/send", verifyToken, async (req, res) => {
             type: templateMediaUrl ? "image" : "text"
         }]).select().single();
 
-        if (insertError) {
-            console.error("❌ DB Insert Error:", insertError);
-        }
-
         await supabase.from('contacts').update({ 
             last_message: sanitizedBodyText.substring(0, 40) + "...", 
             last_message_time: new Date().toISOString() 
@@ -212,12 +206,14 @@ router.post("/send", verifyToken, async (req, res) => {
         res.status(200).json(savedMsg);
 
     } catch (err) {
-        console.error("❌ Send Template Error:", err.response ? JSON.stringify(err.response.data) : err.message);
-        res.status(500).json({ message: err.response?.data?.error?.message || "Failed to send template to Meta", details: err.response?.data });
+        // 🔥 ERROR CATCHING FOR POPUP
+        const metaError = err.response?.data?.error?.message || "Failed to send template. Please check media or variables.";
+        console.error("❌ Send Template Error:", metaError);
+        res.status(500).json({ message: metaError });
     }
 });
 
-// 4. DELETE TEMPLATE (FROM META & CRM)
+// 4. DELETE TEMPLATE
 router.delete("/:name", verifyToken, async (req, res) => {
     try {
         let ownerId = req.user.id;
@@ -232,16 +228,11 @@ router.delete("/:name", verifyToken, async (req, res) => {
         }
 
         const templateName = req.params.name;
-        
-        // Meta API Call to Delete Template
         const url = `https://graph.facebook.com/v18.0/${ownerUser.waba_id}/message_templates?name=${templateName}`;
-        await axios.delete(url, {
-            headers: { Authorization: `Bearer ${ownerUser.access_token}` }
-        });
-
+        
+        await axios.delete(url, { headers: { Authorization: `Bearer ${ownerUser.access_token}` } });
         res.status(200).json({ message: "Template deleted successfully from Meta!" });
     } catch (err) {
-        console.error("Delete Template Error:", err.response ? err.response.data : err.message);
         res.status(500).json({ message: "Failed to delete template", details: err.response?.data });
     }
 });
