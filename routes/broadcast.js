@@ -6,14 +6,10 @@ const { verifyToken } = require("../verifyToken");
 // routes/broadcast.js හි send-24h route එක පමනක් වෙනස් කරන්න
 router.post("/send-24h", verifyToken, async (req, res) => {
     try {
-        const { messageText, mediaUrl, mediaType, recipients } = req.body; // 🔥 recipients ගත්තා
+        const { messageText, mediaUrl, mediaType, recipients } = req.body; 
         
         if (!messageText && !mediaUrl) {
             return res.status(400).json({ message: "Message text or media is required." });
-        }
-
-        if (!recipients || !Array.isArray(recipients) || recipients.length === 0) {
-            return res.status(400).json({ message: "No contacts selected for the broadcast." });
         }
 
         let ownerId = req.user.id;
@@ -27,24 +23,44 @@ router.post("/send-24h", verifyToken, async (req, res) => {
             return res.status(400).json({ message: "WhatsApp API is not configured." });
         }
 
-        // 🔥 1. Filter 24h Active Contacts AND only the selected numbers
         const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
         
-        const { data: activeContacts, error: contactErr } = await supabase
-            .from('contacts')
-            .select('*')
-            .eq('owner_id', ownerId)
-            .in('phone_number', recipients) // 🔥 ටික් කරපු නම්බර් වලට විතරක් සීමා කරනවා
-            .gte('last_message_time', twentyFourHoursAgo);
+        let activeContacts = [];
+        let contactErr = null;
+
+        // 🔥 වෙනස මෙතනයි:
+        // Recipients එවලා තියෙනවා නම් ඒ අයට විතරක් යවනවා (Tick කරපුවා/Select All).
+        // Recipients හිස් නම්, පැය 24 ඇතුළත ඉන්න ඔක්කොටම යවනවා.
+        if (recipients && Array.isArray(recipients) && recipients.length > 0) {
+            const result = await supabase
+                .from('contacts')
+                .select('*')
+                .eq('owner_id', ownerId)
+                .in('phone_number', recipients) 
+                .gte('last_message_time', twentyFourHoursAgo);
+            
+            activeContacts = result.data;
+            contactErr = result.error;
+        } else {
+            // කාවවත් Tick කරලා නෑ කියන්නේ, මුළු 24h List එකටම යවන්න ඕනේ.
+            const result = await supabase
+                .from('contacts')
+                .select('*')
+                .eq('owner_id', ownerId)
+                .gte('last_message_time', twentyFourHoursAgo);
+                
+            activeContacts = result.data;
+            contactErr = result.error;
+        }
 
         if (contactErr) throw contactErr;
 
         if (!activeContacts || activeContacts.length === 0) {
-            return res.status(400).json({ message: "None of the selected contacts are within the 24h active window." });
+            return res.status(400).json({ message: "No active contacts found in the last 24 hours." });
         }
 
         res.status(200).json({ 
-            message: `Broadcast started! Sending to ${activeContacts.length} valid 24h active contacts out of ${recipients.length} selected.` 
+            message: `Broadcast started! Sending to ${activeContacts.length} valid 24h active contacts.` 
         });
 
         console.log(`🚀 SAFE BROADCAST STARTED: Sending to ${activeContacts.length} valid contacts...`);
