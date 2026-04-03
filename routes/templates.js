@@ -70,7 +70,6 @@ router.get("/", verifyToken, async (req, res) => {
 // 2. CREATE TEMPLATE
 router.post("/create", verifyToken, async (req, res) => {
     try {
-        // 🔥 NEW: Extract 'buttons' from body
         const { name, category, language, bodyText, headerType, headerText, footerText, headerUrl, buttons } = req.body;
         
         let ownerId = req.user.id;
@@ -98,6 +97,7 @@ router.post("/create", verifyToken, async (req, res) => {
                 if (!fileHandle) {
                     return res.status(400).json({ message: "Failed to upload media to Meta. Check file format/size." });
                 }
+                // 🔥 වෙනස: අපි header_handle එක විදිහට Meta Handle එක යවනවා.
                 headerComponent.example = { header_handle: [fileHandle] };
             }
             components.push(headerComponent);
