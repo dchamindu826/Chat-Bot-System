@@ -70,9 +70,9 @@ const createBackup = () => {
     const fileName = `backup_${timestamp}.sql`;
     const filePath = path.join(BACKUP_DIR, fileName);
 
-    // pg_dump command එක (Docker ඇතුලේ තියෙන DB එකෙන් ගන්නවා)
-    // Docker setup එක නිසා කෙලින්ම PGPASSWORD දීලා ගන්නවා
-    const command = `PGPASSWORD="${DB_PASSWORD}" pg_dump -h ${DB_HOST} -U ${DB_USER} -p ${DB_PORT} -d ${DB_NAME} -F p -f "${filePath}"`;
+    // 🔥 වෙනස මෙතනයි: කෙලින්ම docker exec හරහා supabase-db කන්ටේනර් එක ඇතුලෙන්ම pg_dump එක run කරනවා
+    // (මේකෙදි password එකක් ඕනෙත් නෑ, pooler එකේ හැප්පෙන්නෙත් නෑ)
+    const command = `docker exec supabase-db pg_dump -U postgres -d postgres -F p > "${filePath}"`;
 
     console.log(`⏳ Starting Auto-Backup: ${fileName}`);
 

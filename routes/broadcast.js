@@ -6,10 +6,14 @@ const { verifyToken } = require("../verifyToken");
 // routes/broadcast.js හි send-24h route එක පමනක් වෙනස් කරන්න
 router.post("/send-24h", verifyToken, async (req, res) => {
     try {
-        const { messageText, mediaUrl, mediaType } = req.body;
+        const { messageText, mediaUrl, mediaType, recipients } = req.body; // 🔥 recipients ගත්තා
         
         if (!messageText && !mediaUrl) {
             return res.status(400).json({ message: "Message text or media is required." });
+        }
+
+        if (!recipients || !Array.isArray(recipients) || recipients.length === 0) {
+            return res.status(400).json({ message: "No contacts selected for the broadcast." });
         }
 
         let ownerId = req.user.id;
@@ -23,30 +27,27 @@ router.post("/send-24h", verifyToken, async (req, res) => {
             return res.status(400).json({ message: "WhatsApp API is not configured." });
         }
 
-        // 1. Filter 24h Active Contacts
+        // 🔥 1. Filter 24h Active Contacts AND only the selected numbers
         const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        
         const { data: activeContacts, error: contactErr } = await supabase
             .from('contacts')
             .select('*')
             .eq('owner_id', ownerId)
+            .in('phone_number', recipients) // 🔥 ටික් කරපු නම්බර් වලට විතරක් සීමා කරනවා
             .gte('last_message_time', twentyFourHoursAgo);
 
         if (contactErr) throw contactErr;
 
         if (!activeContacts || activeContacts.length === 0) {
-            return res.status(400).json({ message: "No active contacts found in the last 24 hours." });
+            return res.status(400).json({ message: "None of the selected contacts are within the 24h active window." });
         }
 
-        // 🔥 NEW: Broadcast Job එකක් Database එකේ Create කරනවා
-        // (අපේ Supabase එකේ මේකට වෙනම ටේබල් එකක් තියෙනවද? අපි නිකන්ම "Broadcast History" කියලා එකක් හදමු)
-        // Note: ඔයාගේ කලින් Mongoose කෝඩ් එකේ Broadcasts සේව් කරා. අපි මේක Supabase එකේ "broadcast_jobs" වගේ ටේබල් එකක් තියෙනවා කියලා හිතලා සේව් කරමු.
-        
-        // ක්ෂණිකව Response එක යවනවා
         res.status(200).json({ 
-            message: `Broadcast started! Sending to ${activeContacts.length} active contacts.` 
+            message: `Broadcast started! Sending to ${activeContacts.length} valid 24h active contacts out of ${recipients.length} selected.` 
         });
 
-        console.log(`🚀 SAFE BROADCAST STARTED: Sending to ${activeContacts.length} contacts...`);
+        console.log(`🚀 SAFE BROADCAST STARTED: Sending to ${activeContacts.length} valid contacts...`);
 
         let successCount = 0;
         let failCount = 0;
@@ -85,7 +86,6 @@ router.post("/send-24h", verifyToken, async (req, res) => {
 
                 successCount++;
             } catch (err) {
-                // මෙතනදී තමයි අර 131047 Error එක අල්ලගන්නේ (Fail වෙන ඒවා)
                 failCount++;
                 console.error(`⚠️ Skipped ${contact.phone_number}: Passed 24h limit on Meta.`);
             }
@@ -96,10 +96,11 @@ router.post("/send-24h", verifyToken, async (req, res) => {
 
         console.log(`✅ BROADCAST FINISHED: Sent: ${successCount} | Failed (24h Expired): ${failCount}`);
 
-        // ඔයාට ඕනේ නම් මේ Success/Fail ගාණ අර Broadcast History Table එකට අප්ඩේට් කරන්න පුළුවන්.
-
     } catch (err) {
         console.error("❌ Broadcast Error:", err);
+        if (!res.headersSent) {
+            res.status(500).json({ message: "Server error occurred during broadcast." });
+        }
     }
 });
 
