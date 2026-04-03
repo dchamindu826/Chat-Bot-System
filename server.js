@@ -16,6 +16,7 @@ const broadcastRoute = require("./routes/broadcast");
 const cronRoute = require("./routes/cron"); 
 const quickReplyRoute = require("./routes/quickReplies");
 const templateRoute = require("./routes/templates"); 
+const adminRoute = require("./routes/admin");
 
 dotenv.config();
 
@@ -52,6 +53,7 @@ app.use("/api/broadcast", broadcastRoute);
 app.use("/api/cron", cronRoute); 
 app.use("/api/templates", templateRoute);
 app.use("/api/quick-replies", quickReplyRoute);
+app.use("/api/admin", adminRoute);
 
 // 404 handler
 app.use((req, res) => {
