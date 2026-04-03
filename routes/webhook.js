@@ -94,8 +94,19 @@ router.post("/", async (req, res) => {
                 for (const change of entry.changes) {
                     const value = change.value;
 
-                    if (value.statuses) continue;
+                    // 🔥 NEW: Status Updates අල්ලන කොටස
+                    if (value.statuses && value.statuses.length > 0) {
+                        const statusObj = value.statuses[0];
+                        console.log(`\n[WEBHOOK STATUS] Msg ID: ${statusObj.id} | Status: ${statusObj.status}`);
+                        
+                        // Error එකක් ආවොත් ඒක පැහැදිලිව පෙන්නනවා
+                        if (statusObj.errors && statusObj.errors.length > 0) {
+                            console.error(`🔥 META DELIVERY ERROR:`, JSON.stringify(statusObj.errors[0], null, 2));
+                        }
+                        continue; // Status එකක් නම් ඊළඟට යන්න ඕනේ නෑ
+                    }
 
+                    // ... ඉතුරු ටික (value.messages අල්ලන එක) පරණ විදිහටමයි ...
                     if (value.messages && value.messages.length > 0) {
                         const msgObj = value.messages[0];
                         const msgId = msgObj.id; 
@@ -183,9 +194,7 @@ router.post("/", async (req, res) => {
                             lastMessageText = `📎 ${msgType}`;
                         }
                         
-                        // =======================================================
-                        // 🔥 FIX: Clean out PostgreSQL Null Bytes (\u0000) to prevent Database Crashes!
-                        // =======================================================
+                        // Clean out PostgreSQL Null Bytes (\u0000)
                         msgBody = msgBody ? msgBody.replace(/\0/g, '') : "";
                         lastMessageText = lastMessageText ? lastMessageText.replace(/\0/g, '') : "";
 
