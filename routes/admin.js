@@ -159,4 +159,18 @@ router.post("/backups/manual", verifyToken, (req, res) => {
     res.status(200).json({ message: "Manual backup started. It will appear in the list shortly." });
 });
 
+// --- 5. GET LIVE PM2 LOGS API ---
+router.get("/logs", verifyToken, (req, res) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ message: "Admin access required" });
+
+    // pm2 logs වලින් අන්තිම පේළි 100 ගන්නවා
+    exec('pm2 logs crm-backend --lines 100 --nostream', (error, stdout, stderr) => {
+        if (error) {
+            return res.status(500).json({ error: "Failed to read logs", details: error.message });
+        }
+        // Terminal output එක string එකක් විදිහට යවනවා
+        res.status(200).json({ logs: stdout || stderr });
+    });
+});
+
 module.exports = router;
