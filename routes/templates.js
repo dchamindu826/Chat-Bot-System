@@ -3,7 +3,7 @@ const axios = require("axios");
 const supabase = require("../supabase");
 const { verifyToken } = require("../verifyToken");
 
-// 🔥 HELPER: Upload File to Meta & Get Handle
+// 🔥 HELPER: Upload File to Meta & Get Handle (For Images/Videos/Docs in Templates)
 const uploadToMeta = async (fileUrl, accessToken) => {
     try {
         const debugRes = await axios.get(`https://graph.facebook.com/v18.0/debug_token`, {
@@ -32,6 +32,7 @@ const uploadToMeta = async (fileUrl, accessToken) => {
         });
 
         return handleRes.data.h;
+
     } catch (error) {
         console.error("❌ Meta Upload Failed:", error.response ? error.response.data : error.message);
         return null;
@@ -58,12 +59,15 @@ router.get("/", verifyToken, async (req, res) => {
         const response = await axios.get(url, { headers: { Authorization: `Bearer ${ownerUser.access_token}` } });
 
         res.status(200).json(response.data.data);
+
     } catch (err) {
-        res.status(500).json({ message: "Failed to fetch templates from Meta" });
+        console.error("Fetch Templates Error:", err.response ? err.response.data : err.message);
+        const errorMsg = err.response?.data?.error?.message || "Failed to fetch templates from Meta";
+        res.status(err.response?.status || 500).json({ message: errorMsg });
     }
 });
 
-// 2. CREATE TEMPLATE (WITH BUTTONS)
+// 2. CREATE TEMPLATE
 router.post("/create", verifyToken, async (req, res) => {
     try {
         // 🔥 NEW: Extract 'buttons' from body
@@ -101,11 +105,13 @@ router.post("/create", verifyToken, async (req, res) => {
 
         // --- B. BODY COMPONENT ---
         let bodyComponent = { type: "BODY", text: bodyText };
+        
         const variableCount = (bodyText.match(/{{/g) || []).length;
         if (variableCount > 0) {
             const bodyExamples = Array.from({ length: variableCount }, (_, i) => `SampleData`);
             bodyComponent.example = { body_text: [bodyExamples] };
         }
+        
         components.push(bodyComponent);
         
         // --- C. FOOTER COMPONENT ---
@@ -139,9 +145,11 @@ router.post("/create", verifyToken, async (req, res) => {
     }
 });
 
-// 3. SEND TEMPLATE MESSAGE
+// 3. SEND TEMPLATE MESSAGE (For UserInbox)
 router.post("/send", verifyToken, async (req, res) => {
     try {
+        console.log("📩 Received Template Payload:", JSON.stringify(req.body, null, 2));
+
         const { contactId, to, templateName, language, components, templateBodyText, templateMediaUrl } = req.body;
 
         let recipientPhone = to;
@@ -178,17 +186,34 @@ router.post("/send", verifyToken, async (req, res) => {
             }
         };
 
+        // 🔥 මෙන්න මේ කෑල්ල තමයි ඔයාගේ කෝඩ් එකේ අඩු වෙලා තිබ්බේ. 
+        // Buttons වලට payload එකක් නැත්නම් Meta එකෙන් deliver කරන්නේ නෑ.
         if (components && components.length > 0) {
-            payload.template.components = components;
+            const updatedComponents = components.map(comp => {
+                if (comp.type === 'button' || comp.type === 'buttons') {
+                    return {
+                        ...comp,
+                        type: "button",
+                        sub_type: "quick_reply", // අනිවාර්යයි
+                        index: comp.index || 0,
+                        parameters: comp.parameters || [{ type: "payload", payload: `BTN_${comp.index || 0}` }]
+                    };
+                }
+                return comp;
+            });
+            payload.template.components = updatedComponents;
         }
+
+        console.log(`🚀 Sending Request to Meta -> Phone: ${recipientPhone} | Template: ${templateName}`);
 
         // Meta එකට යවනවා
         await axios.post(url, payload, { headers });
 
+        // 🔥 FIX FOR POSTGRESQL \u0000 ERROR (Database Crash වෙන එක නවත්තනවා)
         const sanitizedBodyText = templateBodyText ? templateBodyText.replace(/\0/g, '') : `[Template Sent: ${templateName}]`;
 
         // Database එකේ Save කරනවා
-        const { data: savedMsg } = await supabase.from('messages').insert([{
+        const { data: savedMsg, error: insertError } = await supabase.from('messages').insert([{
             contact_id: contactId,
             owner_id: ownerId,
             text: sanitizedBodyText, 
@@ -198,6 +223,10 @@ router.post("/send", verifyToken, async (req, res) => {
             type: templateMediaUrl ? "image" : "text"
         }]).select().single();
 
+        if (insertError) {
+            console.error("❌ DB Insert Error:", insertError);
+        }
+
         await supabase.from('contacts').update({ 
             last_message: sanitizedBodyText.substring(0, 40) + "...", 
             last_message_time: new Date().toISOString() 
@@ -206,14 +235,13 @@ router.post("/send", verifyToken, async (req, res) => {
         res.status(200).json(savedMsg);
 
     } catch (err) {
-        // 🔥 ERROR CATCHING FOR POPUP
-        const metaError = err.response?.data?.error?.message || "Failed to send template. Please check media or variables.";
-        console.error("❌ Send Template Error:", metaError);
-        res.status(500).json({ message: metaError });
+        console.error("❌ Send Template Error:", err.response ? JSON.stringify(err.response.data) : err.message);
+        const metaError = err.response?.data?.error?.message || "Failed to send template to Meta";
+        res.status(500).json({ message: metaError, details: err.response?.data });
     }
 });
 
-// 4. DELETE TEMPLATE
+// 4. DELETE TEMPLATE (FROM META & CRM)
 router.delete("/:name", verifyToken, async (req, res) => {
     try {
         let ownerId = req.user.id;
@@ -228,12 +256,18 @@ router.delete("/:name", verifyToken, async (req, res) => {
         }
 
         const templateName = req.params.name;
-        const url = `https://graph.facebook.com/v18.0/${ownerUser.waba_id}/message_templates?name=${templateName}`;
         
-        await axios.delete(url, { headers: { Authorization: `Bearer ${ownerUser.access_token}` } });
+        // Meta API Call to Delete Template
+        const url = `https://graph.facebook.com/v18.0/${ownerUser.waba_id}/message_templates?name=${templateName}`;
+        await axios.delete(url, {
+            headers: { Authorization: `Bearer ${ownerUser.access_token}` }
+        });
+
         res.status(200).json({ message: "Template deleted successfully from Meta!" });
     } catch (err) {
-        res.status(500).json({ message: "Failed to delete template", details: err.response?.data });
+        console.error("Delete Template Error:", err.response ? err.response.data : err.message);
+        const errorMsg = err.response?.data?.error?.message || "Failed to delete template";
+        res.status(err.response?.status || 500).json({ message: errorMsg });
     }
 });
 
