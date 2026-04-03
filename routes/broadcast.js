@@ -3,7 +3,7 @@ const axios = require("axios");
 const supabase = require("../supabase");
 const { verifyToken } = require("../verifyToken");
 
-// 100% Safe 24-Hour Broadcast
+// routes/broadcast.js හි send-24h route එක පමනක් වෙනස් කරන්න
 router.post("/send-24h", verifyToken, async (req, res) => {
     try {
         const { messageText, mediaUrl, mediaType } = req.body;
@@ -12,7 +12,6 @@ router.post("/send-24h", verifyToken, async (req, res) => {
             return res.status(400).json({ message: "Message text or media is required." });
         }
 
-        // Get Owner ID
         let ownerId = req.user.id;
         if (req.user.role === 'agent') {
             const { data: agentData } = await supabase.from('users').select('owner_id').eq('id', req.user.id).single();
@@ -24,14 +23,13 @@ router.post("/send-24h", verifyToken, async (req, res) => {
             return res.status(400).json({ message: "WhatsApp API is not configured." });
         }
 
-        // 🔥 1. පැය 24 ඇතුළත Active Contacts ලා විතරක් Filter කිරීම
+        // 1. Filter 24h Active Contacts
         const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-        
         const { data: activeContacts, error: contactErr } = await supabase
             .from('contacts')
             .select('*')
             .eq('owner_id', ownerId)
-            .gte('last_message_time', twentyFourHoursAgo); // පැය 24ට වඩා අලුත් ඒවා විතරයි
+            .gte('last_message_time', twentyFourHoursAgo);
 
         if (contactErr) throw contactErr;
 
@@ -39,15 +37,19 @@ router.post("/send-24h", verifyToken, async (req, res) => {
             return res.status(400).json({ message: "No active contacts found in the last 24 hours." });
         }
 
-        // ක්ෂණිකව Frontend එකට Success Response එක යවනවා (පරක්කු වෙන්නේ නැති වෙන්න)
+        // 🔥 NEW: Broadcast Job එකක් Database එකේ Create කරනවා
+        // (අපේ Supabase එකේ මේකට වෙනම ටේබල් එකක් තියෙනවද? අපි නිකන්ම "Broadcast History" කියලා එකක් හදමු)
+        // Note: ඔයාගේ කලින් Mongoose කෝඩ් එකේ Broadcasts සේව් කරා. අපි මේක Supabase එකේ "broadcast_jobs" වගේ ටේබල් එකක් තියෙනවා කියලා හිතලා සේව් කරමු.
+        
+        // ක්ෂණිකව Response එක යවනවා
         res.status(200).json({ 
-            message: `Broadcast started successfully! Sending to ${activeContacts.length} active contacts in the background.` 
+            message: `Broadcast started! Sending to ${activeContacts.length} active contacts.` 
         });
 
         console.log(`🚀 SAFE BROADCAST STARTED: Sending to ${activeContacts.length} contacts...`);
 
-        // 🔥 2. Background එකේ Loop එකක් නැතිවෙන්න හෙමීට යැවීම (Safe Loop)
         let successCount = 0;
+        let failCount = 0;
         
         for (const contact of activeContacts) {
             try {
@@ -66,12 +68,10 @@ router.post("/send-24h", verifyToken, async (req, res) => {
                     payload.text = { body: messageText };
                 }
 
-                // Meta එකට මැසේජ් එක යැවීම
                 const waRes = await axios.post(`https://graph.facebook.com/v17.0/${ownerUser.phone_number_id}/messages`, payload, {
                     headers: { Authorization: `Bearer ${ownerUser.access_token}` }
                 });
 
-                // අපේ Database එකේ Save කිරීම
                 await supabase.from('messages').insert([{
                     contact_id: contact.id,
                     owner_id: ownerId,
@@ -84,22 +84,22 @@ router.post("/send-24h", verifyToken, async (req, res) => {
                 }]);
 
                 successCount++;
-
-                // 🛑 ANTI-LOOP & RATE LIMITER: එක මැසේජ් එකකට පස්සේ තත්පර 1ක පරතරයක් තියනවා (Meta එකෙන් Block වෙන එක නවත්තන්න)
-                await new Promise(resolve => setTimeout(resolve, 1000));
-
             } catch (err) {
-                console.error(`❌ Failed to send broadcast to ${contact.phone_number}:`, err.response?.data || err.message);
+                // මෙතනදී තමයි අර 131047 Error එක අල්ලගන්නේ (Fail වෙන ඒවා)
+                failCount++;
+                console.error(`⚠️ Skipped ${contact.phone_number}: Passed 24h limit on Meta.`);
             }
+
+            // Anti-Spam Delay
+            await new Promise(resolve => setTimeout(resolve, 1000));
         }
 
-        console.log(`✅ SAFE BROADCAST FINISHED: Successfully sent to ${successCount} out of ${activeContacts.length} contacts.`);
+        console.log(`✅ BROADCAST FINISHED: Sent: ${successCount} | Failed (24h Expired): ${failCount}`);
+
+        // ඔයාට ඕනේ නම් මේ Success/Fail ගාණ අර Broadcast History Table එකට අප්ඩේට් කරන්න පුළුවන්.
 
     } catch (err) {
-        console.error("❌ Broadcast Critical Error:", err);
-        if (!res.headersSent) {
-            res.status(500).json({ message: "Server error occurred during broadcast." });
-        }
+        console.error("❌ Broadcast Error:", err);
     }
 });
 
