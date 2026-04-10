@@ -1,0 +1,90 @@
+const mongoose = require("mongoose");
+const fs = require("fs");
+const path = require("path");
+const { google } = require('googleapis');
+const { exec } = require("child_process");
+const dotenv = require("dotenv");
+
+dotenv.config();
+
+// 🔥 දාන්න ඔයාගේ Drive Folder ID එක මෙතනට
+const DRIVE_FOLDER_ID = ""; 
+
+const backupAndUpload = async () => {
+  try {
+    // 1. Connect DB
+    console.log("🔌 Connecting to Database...");
+    await mongoose.connect(process.env.MONGO_URL);
+    console.log("✅ Connected!");
+
+    // 2. Prepare Folders
+    const dateStr = new Date().toISOString().replace(/:/g, "-").split(".")[0];
+    const backupName = `backup_${dateStr}`;
+    const backupPath = path.join(__dirname, "backups", backupName);
+    const zipPath = path.join(__dirname, "backups", `${backupName}.tar.gz`);
+
+    if (!fs.existsSync(path.join(__dirname, "backups"))) {
+        fs.mkdirSync(path.join(__dirname, "backups"));
+    }
+    fs.mkdirSync(backupPath);
+
+    // 3. Dump Data
+    console.log("📂 Dumping Data...");
+    const collections = await mongoose.connection.db.listCollections().toArray();
+    for (let col of collections) {
+        const data = await mongoose.connection.db.collection(col.name).find({}).toArray();
+        fs.writeFileSync(path.join(backupPath, `${col.name}.json`), JSON.stringify(data, null, 2));
+    }
+
+    // 4. Zip the Folder (Using Linux tar command)
+    console.log("📦 Zipping files...");
+    await new Promise((resolve, reject) => {
+        exec(`tar -czvf ${zipPath} -C ${path.join(__dirname, "backups")} ${backupName}`, (error) => {
+            if (error) reject(error);
+            else resolve();
+        });
+    });
+
+    // 5. Upload to Google Drive
+    console.log("🚀 Uploading to Google Drive...");
+    
+    const auth = new google.auth.GoogleAuth({
+        keyFile: path.join(__dirname, 'google_key.json'),
+        scopes: ['https://www.googleapis.com/auth/drive.file'],
+    });
+
+    const drive = google.drive({ version: 'v3', auth });
+
+    const fileMetadata = {
+        name: `${backupName}.tar.gz`,
+        parents: [DRIVE_FOLDER_ID]
+    };
+
+    const media = {
+        mimeType: 'application/gzip',
+        body: fs.createReadStream(zipPath)
+    };
+
+    const response = await drive.files.create({
+        resource: fileMetadata,
+        media: media,
+        fields: 'id'
+    });
+
+    console.log(`✅ Upload Successful! File ID: ${response.data.id}`);
+
+    // 6. Cleanup (Delete local files to save space)
+    console.log("🧹 Cleaning up local files...");
+    fs.rmSync(backupPath, { recursive: true, force: true });
+    fs.unlinkSync(zipPath);
+
+    console.log("🎉 ALL DONE! Backup is safe in Google Drive.");
+    process.exit(0);
+
+  } catch (error) {
+    console.error("❌ Error:", error);
+    process.exit(1);
+  }
+};
+
+backupAndUpload();

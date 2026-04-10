@@ -60,12 +60,10 @@ app.use((req, res) => {
     res.status(404).json({ message: "Route not found" });
 });
 
-// For Local Development
-if (process.env.NODE_ENV !== 'production') {
-    const PORT = process.env.PORT || 5000;
-    app.listen(PORT, () => {
-      console.log(`Backend server is running on port ${PORT}!`);
-    });
-}
+
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => {
+    console.log(`✅ Backend server is successfully running on port ${PORT}!`);
+});
 
 module.exports = app;
